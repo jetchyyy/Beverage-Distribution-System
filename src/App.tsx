@@ -18,8 +18,10 @@ import { MicroStoresPage } from './pages/admin/MicroStoresPage';
 import { SalesPage } from './pages/admin/SalesPage';
 import { ReturnablesPundoPage } from './pages/admin/ReturnablesPundoPage';
 import { PurchasingPage } from './pages/admin/PurchasingPage';
+import { PromotionsPage } from './pages/admin/PromotionsPage';
 import { ReportsPage } from './pages/admin/ReportsPage';
 import { SettingsPage } from './pages/admin/SettingsPage';
+import { UserManagementPage } from './pages/admin/UserManagementPage';
 
 // Agent Portal
 import { AgentLayout } from './layouts/AgentLayout';
@@ -28,6 +30,7 @@ import { AgentDeliveryFlow } from './pages/agent/AgentDeliveryFlow';
 import { AgentTruckStock } from './pages/agent/AgentTruckStock';
 import { AgentPundoView } from './pages/agent/AgentPundoView';
 import { AgentReconciliation } from './pages/agent/AgentReconciliation';
+import { AgentSalesHistory } from './pages/agent/AgentSalesHistory';
 
 // Auth
 import { LoginPage } from './pages/auth/LoginPage';
@@ -61,12 +64,14 @@ export const App: React.FC = () => {
                       <Route path="products" element={<ProductsPage />} />
                       <Route path="warehouse" element={<WarehousePage />} />
                       <Route path="transfers" element={<StockTransfersPage />} />
+                      <Route path="promotions" element={<PromotionsPage />} />
                       <Route path="agents-trucks" element={<AgentsTrucksPage />} />
                       <Route path="stores" element={<MicroStoresPage />} />
                       <Route path="sales" element={<SalesPage />} />
                       <Route path="pundo" element={<ReturnablesPundoPage />} />
                       <Route path="purchasing" element={<PurchasingPage />} />
                       <Route path="reports" element={<ReportsPage />} />
+                      <Route path="users" element={<UserManagementPage />} />
                       <Route path="settings" element={<SettingsPage />} />
                     </Routes>
                   </AdminLayout>
@@ -83,6 +88,7 @@ export const App: React.FC = () => {
                     <Routes>
                       <Route index element={<AgentDashboard />} />
                       <Route path="deliver" element={<AgentDeliveryFlow />} />
+                      <Route path="sales-history" element={<AgentSalesHistory />} />
                       <Route path="truck" element={<AgentTruckStock />} />
                       <Route path="pundo" element={<AgentPundoView />} />
                       <Route path="reconcile" element={<AgentReconciliation />} />

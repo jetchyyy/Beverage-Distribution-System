@@ -232,6 +232,31 @@ export const WarehousePage: React.FC = () => {
           .eq('id', existingInv.id);
       }
 
+      // Sync product_batches remaining_quantity on manual adjustment
+      if (deltaQty < 0) {
+        let remainingToDeduct = Math.abs(deltaQty);
+        const prodBatches = batches.filter((b) => b.product_id === selectedProdId && Number(b.remaining_quantity || 0) > 0);
+        for (const b of prodBatches) {
+          if (remainingToDeduct <= 0) break;
+          const curQty = Number(b.remaining_quantity || 0);
+          if (curQty <= remainingToDeduct) {
+            remainingToDeduct -= curQty;
+            await supabase.from('product_batches').update({ remaining_quantity: 0, status: 'DEPLETED' }).eq('id', b.id);
+          } else {
+            const newQty = curQty - remainingToDeduct;
+            remainingToDeduct = 0;
+            await supabase.from('product_batches').update({ remaining_quantity: newQty }).eq('id', b.id);
+          }
+        }
+      } else if (deltaQty > 0) {
+        const prodBatches = batches.filter((b) => b.product_id === selectedProdId);
+        if (prodBatches.length > 0) {
+          const targetBatch = prodBatches[prodBatches.length - 1];
+          const newQty = Number(targetBatch.remaining_quantity || 0) + Number(deltaQty);
+          await supabase.from('product_batches').update({ remaining_quantity: newQty, status: 'ACTIVE' }).eq('id', targetBatch.id);
+        }
+      }
+
       setIsAdjModalOpen(false);
       setSelectedProdId('');
       setDeltaQty(0);
@@ -253,14 +278,15 @@ export const WarehousePage: React.FC = () => {
     const unitsPerCase = prodPack?.units_per_package || 24;
     const casePrice = prodPrice?.case_price || prodPrice?.price || 0;
 
-    let totalCases = 0;
-    prodBatches.forEach((b) => {
-      totalCases += Number(b.remaining_quantity || 0);
-    });
+    // Use ground truth warehouse location balance from inventory_balances
+    const inv = inventoryBalances.find((b) => b.product_id === p.id && b.locations?.type === 'WAREHOUSE');
+    let totalCases = Number(inv?.quantity ?? -1);
 
-    if (prodBatches.length === 0) {
-      const inv = inventoryBalances.find((b) => b.product_id === p.id && b.locations?.type === 'WAREHOUSE');
-      totalCases = Number(inv?.quantity || 0);
+    if (totalCases < 0) {
+      totalCases = 0;
+      prodBatches.forEach((b) => {
+        totalCases += Number(b.remaining_quantity || 0);
+      });
     }
 
     const totalBottles = totalCases * unitsPerCase;
@@ -834,56 +860,149 @@ export const WarehousePage: React.FC = () => {
       )}
 
       {/* Tab 4: Empty Containers Depot Stock */}
-      {activeTab === 'RETURNABLES' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-          <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <RotateCcw className="w-5 h-5 text-amber-400" />
-              <h3 className="font-bold text-white text-base">Main Warehouse Empty Bottle & Plastic Case Depot Stock</h3>
-            </div>
-            <span className="text-xs text-slate-400 font-mono">{returnableBalances.length} container types</span>
-          </div>
+      {activeTab === 'RETURNABLES' && (() => {
+        // 1. Consolidate raw returnable_balances by (location_id, returnable_item_id)
+        const consolidatedMap = new Map<string, any>();
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-950 text-slate-400 uppercase text-xs font-semibold tracking-wider border-b border-slate-800">
-                <tr>
-                  <th className="px-6 py-4">Returnable Container</th>
-                  <th className="px-6 py-4">Container Type</th>
-                  <th className="px-6 py-4">Main Depot Counted Stock</th>
-                  <th className="px-6 py-4">PUNDO Rate</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {returnableBalances.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="px-6 py-8 text-center text-slate-500 text-xs">
-                      No empty bottles or cases currently stored in main warehouse depot.
-                    </td>
-                  </tr>
-                ) : (
-                  returnableBalances.map((rb) => (
-                    <tr key={rb.id} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="px-6 py-4 font-semibold text-white">{rb.returnable_items?.name || 'Returnable Item'}</td>
-                      <td className="px-6 py-4">
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold uppercase">
-                          {rb.returnable_items?.type || 'BOTTLE'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 font-extrabold font-mono text-amber-300 text-base">
-                        {Number(rb.quantity).toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 text-xs font-mono text-emerald-400">
-                        ₱{Number(rb.returnable_items?.pundo_value || 0).toFixed(2)} / {rb.returnable_items?.unit || 'unit'}
-                      </td>
+        (returnableBalances || []).forEach((rb) => {
+          const locId = rb.location_id || 'WH_MAIN';
+          const itemId = rb.returnable_item_id || rb.id;
+          const key = `${locId}_${itemId}`;
+
+          if (!consolidatedMap.has(key)) {
+            consolidatedMap.set(key, {
+              ...rb,
+              quantity: Number(rb.quantity || 0),
+            });
+          } else {
+            const existing = consolidatedMap.get(key);
+            existing.quantity += Number(rb.quantity || 0);
+          }
+        });
+
+        const consolidatedList = Array.from(consolidatedMap.values());
+
+        // 2. Compute Converted Full Empty Cases & Loose Breakdown per Location
+        let totalWarehouseBottles = 0;
+        let totalWarehouseShellCases = 0;
+
+        consolidatedList.forEach((rb) => {
+          const isWh = rb.locations?.type === 'WAREHOUSE' || !rb.locations;
+          if (isWh) {
+            const itemType = rb.returnable_items?.item_type || rb.returnable_items?.type || 'BOTTLE';
+            if (itemType === 'BOTTLE') totalWarehouseBottles += Number(rb.quantity || 0);
+            if (itemType === 'CASE') totalWarehouseShellCases += Number(rb.quantity || 0);
+          }
+        });
+
+        const bottlesPerCase = 6; // Standard 1L case bottle capacity
+        const fullEmptyCases = Math.min(Math.floor(totalWarehouseBottles / bottlesPerCase), totalWarehouseShellCases);
+        const looseBottles = totalWarehouseBottles - (fullEmptyCases * bottlesPerCase);
+        const looseShellCases = totalWarehouseShellCases - fullEmptyCases;
+
+        return (
+          <div className="space-y-4">
+            {/* Conversion Summary Banner */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+              <div className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-2 font-mono flex items-center gap-1.5">
+                <RotateCcw className="w-4 h-4 text-amber-400" />
+                Main Warehouse Empty Case Conversion & Depot Stock
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-xs">
+                <div className="bg-slate-950 p-3.5 rounded-xl border border-emerald-500/30">
+                  <span className="text-[10px] text-emerald-400 uppercase font-bold block">📦 Full Empty Cases (Complete Sets)</span>
+                  <span className="text-xl font-black text-emerald-400 block mt-1">
+                    {fullEmptyCases} <span className="text-xs text-slate-400 font-normal">cases</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 block mt-0.5">
+                    ({fullEmptyCases * bottlesPerCase} bottles + {fullEmptyCases} shell crates @ {bottlesPerCase} btl/cs)
+                  </span>
+                </div>
+
+                <div className="bg-slate-950 p-3.5 rounded-xl border border-amber-500/30">
+                  <span className="text-[10px] text-amber-300 uppercase font-bold block">🍾 Loose Empties Remaining</span>
+                  <span className="text-lg font-extrabold text-amber-300 block mt-1">
+                    {looseBottles} <span className="text-xs text-slate-400 font-normal">bottles</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 block mt-0.5">Unpaired loose bottles</span>
+                </div>
+
+                <div className="bg-slate-950 p-3.5 rounded-xl border border-cyan-500/30">
+                  <span className="text-[10px] text-cyan-300 uppercase font-bold block">📥 Loose Shell Crates</span>
+                  <span className="text-lg font-extrabold text-cyan-300 block mt-1">
+                    {looseShellCases} <span className="text-xs text-slate-400 font-normal">cases</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 block mt-0.5">Empty crates without bottles</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Consolidated Stock Table */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+              <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <RotateCcw className="w-5 h-5 text-amber-400" />
+                  <h3 className="font-bold text-white text-base">Consolidated Empty Bottle & Shell Case Inventory</h3>
+                </div>
+                <span className="text-xs text-slate-400 font-mono">{consolidatedList.length} consolidated container balances</span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm text-slate-300">
+                  <thead className="bg-slate-950 text-slate-400 uppercase text-xs font-semibold tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="px-6 py-4">Returnable Container</th>
+                      <th className="px-6 py-4">Location / Origin</th>
+                      <th className="px-6 py-4">Container Type</th>
+                      <th className="px-6 py-4">Consolidated Depot Stock</th>
+                      <th className="px-6 py-4">PUNDO Valuation Rate</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {consolidatedList.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-6 py-8 text-center text-slate-500 text-xs">
+                          No empty bottles or cases currently stored in main warehouse depot.
+                        </td>
+                      </tr>
+                    ) : (
+                      consolidatedList.map((rb) => {
+                        const itemType = rb.returnable_items?.item_type || rb.returnable_items?.type || 'CONTAINER';
+                        const isWh = rb.locations?.type === 'WAREHOUSE' || !rb.locations;
+
+                        return (
+                          <tr key={rb.id} className="hover:bg-slate-800/40 transition-colors">
+                            <td className="px-6 py-4 font-semibold text-white">
+                              {rb.returnable_items?.name || 'Returnable Container'}
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`text-xs font-bold ${isWh ? 'text-indigo-400 font-mono' : 'text-cyan-400 font-mono'}`}>
+                                {rb.locations?.name || 'Main Warehouse Depot'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold uppercase">
+                                {itemType}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 font-extrabold font-mono text-amber-300 text-base">
+                              {Number(rb.quantity).toLocaleString()} <span className="text-xs text-slate-500 font-normal">{rb.returnable_items?.unit || 'pcs'}</span>
+                            </td>
+                            <td className="px-6 py-4 text-xs font-mono text-emerald-400 font-bold">
+                              ₱{Number(rb.returnable_items?.pundo_value || rb.returnable_items?.deposit_rate || 0).toFixed(2)} / {rb.returnable_items?.unit || 'pc'}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Stock In (Receive New Batch) Modal */}
       {isStockInModalOpen && (

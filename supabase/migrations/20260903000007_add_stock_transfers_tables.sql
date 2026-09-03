@@ -1,5 +1,5 @@
 -- ============================================================================
--- MIGRATION: CREATE STOCK TRANSFERS & STOCK TRANSFER ITEMS TABLES WITH RLS
+-- MIGRATION: CREATE STOCK TRANSFERS & STOCK TRANSFER ITEMS TABLES WITH FK & RLS
 -- File: supabase/migrations/20260903000007_add_stock_transfers_tables.sql
 -- ============================================================================
 
@@ -25,6 +25,19 @@ CREATE TABLE IF NOT EXISTS public.stock_transfer_items (
     unit TEXT DEFAULT 'case',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Safely add missing columns to pre-existing stock_transfers and stock_transfer_items tables
+ALTER TABLE public.stock_transfers
+ADD COLUMN IF NOT EXISTS transfer_type TEXT DEFAULT 'WAREHOUSE_TO_TRUCK';
+
+ALTER TABLE public.stock_transfers
+ADD COLUMN IF NOT EXISTS notes TEXT;
+
+ALTER TABLE public.stock_transfer_items
+ADD COLUMN IF NOT EXISTS returnable_item_id UUID REFERENCES public.returnable_items(id);
+
+ALTER TABLE public.stock_transfer_items
+ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'PRODUCT';
 
 -- Enable RLS and Tenant Access Policies
 ALTER TABLE public.stock_transfers ENABLE ROW LEVEL SECURITY;

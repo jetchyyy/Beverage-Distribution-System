@@ -12,6 +12,7 @@ import {
   LogOut,
   User,
   ShieldCheck,
+  History,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
@@ -28,6 +29,7 @@ export const AgentLayout: React.FC<AgentLayoutProps> = ({ children }) => {
   const navItems = [
     { label: 'Home', path: '/agent', icon: Home },
     { label: 'New Delivery', path: '/agent/deliver', icon: ShoppingBag },
+    { label: 'Sales History', path: '/agent/sales-history', icon: History },
     { label: 'My Truck Stock', path: '/agent/truck', icon: Truck },
     { label: 'Store PUNDO', path: '/agent/pundo', icon: RotateCcw },
     { label: 'Reconcile', path: '/agent/reconcile', icon: CheckSquare },

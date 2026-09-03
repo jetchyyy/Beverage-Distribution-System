@@ -23,6 +23,7 @@ import {
   Users,
   DollarSign,
   TrendingUp,
+  AlertTriangle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -38,6 +39,11 @@ export const SuperAdminDashboard: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isSqlModalOpen, setIsSqlModalOpen] = useState<boolean>(false);
   const [copiedSql, setCopiedSql] = useState(false);
+
+  // Reset Modal & Data Download State
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [resettingTenant, setResettingTenant] = useState<any | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   // Form State
   const [name, setName] = useState('');
@@ -168,6 +174,126 @@ export const SuperAdminDashboard: React.FC = () => {
   const handleEnterTenant = (tenantSlug: string) => {
     setDevTenantSlug(tenantSlug);
     navigate('/admin');
+  };
+
+  const handleDownloadTenantData = async (t: any) => {
+    setDownloadingId(t.id);
+    try {
+      const [
+        { data: products },
+        { data: product_batches },
+        { data: product_packaging },
+        { data: product_prices },
+        { data: returnable_items },
+        { data: locations },
+        { data: warehouses },
+        { data: trucks },
+        { data: agents },
+        { data: micro_stores },
+        { data: sales },
+        { data: pundo_ledger },
+        { data: stock_transfers },
+        { data: inventory_balances },
+        { data: returnable_balances },
+        { data: suppliers },
+        { data: stock_in_receipts },
+        { data: profiles },
+      ] = await Promise.all([
+        supabase.from('products').select('*').eq('tenant_id', t.id),
+        supabase.from('product_batches').select('*').eq('tenant_id', t.id),
+        supabase.from('product_packaging').select('*').eq('tenant_id', t.id),
+        supabase.from('product_prices').select('*').eq('tenant_id', t.id),
+        supabase.from('returnable_items').select('*').eq('tenant_id', t.id),
+        supabase.from('locations').select('*').eq('tenant_id', t.id),
+        supabase.from('warehouses').select('*').eq('tenant_id', t.id),
+        supabase.from('trucks').select('*').eq('tenant_id', t.id),
+        supabase.from('agents').select('*').eq('tenant_id', t.id),
+        supabase.from('micro_stores').select('*').eq('tenant_id', t.id),
+        supabase.from('sales').select('*').eq('tenant_id', t.id),
+        supabase.from('pundo_ledger').select('*').eq('tenant_id', t.id),
+        supabase.from('stock_transfers').select('*').eq('tenant_id', t.id),
+        supabase.from('inventory_balances').select('*').eq('tenant_id', t.id),
+        supabase.from('returnable_balances').select('*').eq('tenant_id', t.id),
+        supabase.from('suppliers').select('*').eq('tenant_id', t.id),
+        supabase.from('stock_in_receipts').select('*').eq('tenant_id', t.id),
+        supabase.from('profiles').select('*').eq('tenant_id', t.id),
+      ]);
+
+      const backupObject = {
+        tenant: t,
+        exported_at: new Date().toISOString(),
+        catalog: {
+          products,
+          product_batches,
+          product_packaging,
+          product_prices,
+          returnable_items,
+          suppliers,
+        },
+        infrastructure: {
+          locations,
+          warehouses,
+          trucks,
+          agents,
+          micro_stores,
+          profiles,
+        },
+        operations: {
+          sales,
+          pundo_ledger,
+          stock_transfers,
+          inventory_balances,
+          returnable_balances,
+          stock_in_receipts,
+        },
+      };
+
+      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backupObject, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute('href', dataStr);
+      downloadAnchor.setAttribute('download', `tenant_backup_${t.slug}_${new Date().toISOString().slice(0, 10)}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    } catch (err: any) {
+      alert('Failed to export tenant data: ' + (err.message || err));
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  const handleOpenResetModal = (t: any) => {
+    setResettingTenant(t);
+    setIsResetModalOpen(true);
+  };
+
+  const confirmResetTenantData = async () => {
+    if (!resettingTenant) return;
+    setSaving(true);
+    try {
+      const tId = resettingTenant.id;
+
+      // Wipe operational transaction tables so tenant starts from scratch
+      await supabase.from('sales').delete().eq('tenant_id', tId);
+      await supabase.from('pundo_ledger').delete().eq('tenant_id', tId);
+      await supabase.from('stock_transfers').delete().eq('tenant_id', tId);
+      await supabase.from('inventory_balances').delete().eq('tenant_id', tId);
+      await supabase.from('returnable_balances').delete().eq('tenant_id', tId);
+      await supabase.from('product_batches').delete().eq('tenant_id', tId);
+
+      try { await supabase.from('stock_in_receipts').delete().eq('tenant_id', tId); } catch (_) {}
+      try { await supabase.from('purchase_receipts').delete().eq('tenant_id', tId); } catch (_) {}
+      try { await supabase.from('truck_reconciliations').delete().eq('tenant_id', tId); } catch (_) {}
+
+      setIsResetModalOpen(false);
+      setResettingTenant(null);
+      alert(`Tenant '${resettingTenant.name}' data reset successfully! Organization can now start fresh from scratch.`);
+      fetchTenants();
+    } catch (err: any) {
+      alert('Failed to reset tenant data: ' + (err.message || err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const superAdminSqlScript = `-- ============================================================================
@@ -481,12 +607,21 @@ DO UPDATE SET
                                 Edit Config
                               </button>
 
-                              <button className="text-slate-500 hover:text-slate-300 p-1" title="Backup Database">
-                                <Download className="w-3.5 h-3.5" />
+                              <button
+                                onClick={() => handleDownloadTenantData(t)}
+                                disabled={downloadingId === t.id}
+                                className="text-cyan-400 hover:text-cyan-300 p-1.5 rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50"
+                                title="Download Tenant Backup Data (JSON)"
+                              >
+                                <Download className="w-4 h-4" />
                               </button>
 
-                              <button className="text-slate-500 hover:text-slate-300 p-1" title="Sync Instance">
-                                <RotateCw className="w-3.5 h-3.5" />
+                              <button
+                                onClick={() => handleOpenResetModal(t)}
+                                className="text-amber-400 hover:text-amber-300 p-1.5 rounded-lg hover:bg-amber-500/10 transition-colors"
+                                title="Clear Operational Data & Start from Scratch"
+                              >
+                                <RotateCw className="w-4 h-4" />
                               </button>
 
                               <button
@@ -677,6 +812,59 @@ DO UPDATE SET
                 className="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white text-xs"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Tenant Data Confirmation Modal */}
+      {isResetModalOpen && resettingTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+          <div className="bg-[#0f172a] border border-amber-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl text-slate-100 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2 text-amber-400 font-extrabold">
+                <AlertTriangle className="w-5 h-5" />
+                <h3 className="text-lg">Clear Tenant Operational Data</h3>
+              </div>
+              <button onClick={() => setIsResetModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+
+            <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-200 text-xs leading-relaxed space-y-2">
+              <p className="font-bold">
+                ⚠️ PERMANENT DATA RESET WARNING:
+              </p>
+              <p>
+                Are you sure you want to clear all operational transactions for tenant <strong className="text-white">{resettingTenant.name}</strong>?
+              </p>
+              <ul className="list-disc pl-4 space-y-1 text-[11px] text-amber-300 font-mono">
+                <li>Sales & Delivery Statements</li>
+                <li>Stock Transfers & Offloads</li>
+                <li>Warehouse & Truck Inventory Balances</li>
+                <li>Empty Container Returnable Balances</li>
+                <li>PUNDO Deposit Ledgers</li>
+                <li>Stock In Receipts & FIFO Batches</li>
+              </ul>
+              <p className="text-[11px] text-slate-400 italic">
+                Catalog definitions (products, packaging, stores & user accounts) will be preserved so the tenant can start fresh from scratch.
+              </p>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsResetModalOpen(false)}
+                className="px-4 py-2.5 rounded-2xl bg-slate-900 text-slate-300 hover:bg-slate-800 text-xs font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={confirmResetTenantData}
+                className="px-5 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs shadow-lg shadow-amber-600/30 border border-amber-500/40"
+              >
+                {saving ? 'Clearing Tenant Data...' : 'Confirm & Clear Data to Scratch'}
               </button>
             </div>
           </div>

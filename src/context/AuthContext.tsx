@@ -15,8 +15,16 @@ interface AuthContextType {
   isWarehouseStaff: boolean;
   isAgent: boolean;
   isAccounting: boolean;
+  hasFeatureAccess: (featureKey: string) => boolean;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
-  createSecondaryUser: (email: string, password: string, fullName: string, role?: UserRole, tenantId?: string) => Promise<{ error: any; data?: any }>;
+  createSecondaryUser: (
+    email: string,
+    password: string,
+    fullName: string,
+    role?: UserRole,
+    tenantId?: string,
+    allowedFeatures?: string[]
+  ) => Promise<{ error: any; data?: any }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -97,7 +105,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     password: string,
     fullName: string,
     userRole: UserRole = 'TENANT_ADMIN',
-    tenantId?: string
+    tenantId?: string,
+    allowedFeatures: string[] = []
   ) => {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -137,6 +146,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           full_name: fullName,
           email,
           role: userRole,
+          allowed_features: allowedFeatures,
           status: 'ACTIVE',
         },
       ]);
@@ -162,6 +172,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isAgent = role === 'AGENT';
   const isAccounting = role === 'ACCOUNTING_REPORT' || isTenantAdmin;
 
+  const hasFeatureAccess = (featureKey: string): boolean => {
+    if (isSuperAdmin || isTenantAdmin) return true;
+    if (!profile) return false;
+    const features = profile.allowed_features;
+    if (!features || features.length === 0) return true; // Default open if no restrictions configured
+    return features.includes(featureKey);
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -175,6 +193,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isWarehouseStaff,
         isAgent,
         isAccounting,
+        hasFeatureAccess,
         signIn,
         createSecondaryUser,
         signOut,

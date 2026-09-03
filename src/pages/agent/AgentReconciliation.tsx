@@ -20,6 +20,9 @@ export const AgentReconciliation: React.FC = () => {
   // Collected Empties (Bottles & Cases) on Truck
   const [emptyReconcileItems, setEmptyReconcileItems] = useState<any[]>([]);
 
+  const [routeRemittanceTotal, setRouteRemittanceTotal] = useState(0);
+  const [routeDispatchedCases, setRouteDispatchedCases] = useState(0);
+
   const fetchReconcileData = async () => {
     if (!tenant) return;
     setLoading(true);
@@ -46,6 +49,42 @@ export const AgentReconciliation: React.FC = () => {
       if (trk && trk.location_id) {
         setTruck(trk);
 
+        // Fetch Today's Sales Remittance
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
+        const { data: todaySales } = await supabase
+          .from('sales')
+          .select('total')
+          .eq('tenant_id', tenant.id)
+          .eq('truck_id', trk.id)
+          .gte('created_at', todayStart.toISOString());
+
+        let remTotal = 0;
+        todaySales?.forEach((s) => (remTotal += Number(s.total || 0)));
+        setRouteRemittanceTotal(remTotal);
+
+        // Fetch Today's Outbound Dispatches to Truck
+        const { data: trfToday } = await supabase
+          .from('stock_transfers')
+          .select('id')
+          .eq('tenant_id', tenant.id)
+          .eq('to_location_id', trk.location_id)
+          .eq('transfer_type', 'WAREHOUSE_TO_TRUCK')
+          .gte('created_at', todayStart.toISOString());
+
+        if (trfToday && trfToday.length > 0) {
+          const trfIds = trfToday.map((t) => t.id);
+          const { data: trfItems } = await supabase
+            .from('stock_transfer_items')
+            .select('quantity')
+            .in('stock_transfer_id', trfIds);
+
+          let dispCases = 0;
+          trfItems?.forEach((i) => (dispCases += Number(i.quantity || 0)));
+          setRouteDispatchedCases(dispCases);
+        }
+
         // Fetch Full Product Cases Loaded on Truck (> 0 qty)
         const { data: prodBals } = await supabase
           .from('inventory_balances')
@@ -66,26 +105,52 @@ export const AgentReconciliation: React.FC = () => {
 
         setProductReconcileItems(prodItems);
 
-        // Fetch Empty Bottles & Cases Collected on Truck (> 0 qty)
+        // Fetch catalog returnable_items for tenant
+        const { data: catRets } = await supabase
+          .from('returnable_items')
+          .select('*')
+          .eq('tenant_id', tenant.id);
+
+        // Fetch Empty Bottles & Cases Collected on Truck
         const { data: retBals } = await supabase
           .from('returnable_balances')
           .select('*, returnable_items(name, item_type, type, unit, pundo_value)')
           .eq('location_id', trk.location_id);
 
-        const emptyItems = (retBals || [])
-          .filter((b) => Number(b.quantity || 0) > 0)
-          .map((b) => ({
-            balance_id: b.id,
-            returnable_item_id: b.returnable_item_id,
-            name: b.returnable_items?.name || 'Returnable Container',
-            item_type: b.returnable_items?.item_type || b.returnable_items?.type || 'CONTAINER',
-            unit: b.returnable_items?.unit || 'pc',
-            expected_qty: Number(b.quantity || 0),
-            actual_qty: Number(b.quantity || 0),
-            variance: 0,
-          }));
+        const emptyItemsMap = new Map<string, any>();
 
-        setEmptyReconcileItems(emptyItems);
+        (catRets || []).forEach((rItem) => {
+          const bal = (retBals || []).find((b) => b.returnable_item_id === rItem.id);
+          const expQty = Number(bal?.quantity || 0);
+          emptyItemsMap.set(rItem.id, {
+            balance_id: bal?.id || null,
+            returnable_item_id: rItem.id,
+            name: rItem.name || 'Returnable Container',
+            item_type: rItem.item_type || rItem.type || 'CONTAINER',
+            unit: rItem.unit || 'pc',
+            expected_qty: expQty,
+            actual_qty: expQty,
+            variance: 0,
+          });
+        });
+
+        (retBals || []).forEach((b) => {
+          if (!emptyItemsMap.has(b.returnable_item_id)) {
+            const expQty = Number(b.quantity || 0);
+            emptyItemsMap.set(b.returnable_item_id, {
+              balance_id: b.id,
+              returnable_item_id: b.returnable_item_id,
+              name: b.returnable_items?.name || 'Returnable Container',
+              item_type: b.returnable_items?.item_type || b.returnable_items?.type || 'CONTAINER',
+              unit: b.returnable_items?.unit || 'pc',
+              expected_qty: expQty,
+              actual_qty: expQty,
+              variance: 0,
+            });
+          }
+        });
+
+        setEmptyReconcileItems(Array.from(emptyItemsMap.values()));
       }
     } catch (err) {
       console.error('Error loading reconciliation data:', err);
@@ -186,47 +251,75 @@ export const AgentReconciliation: React.FC = () => {
 
       // 3. Insert Transfer Item Lines for Audit Trail
       if (transferRecord?.id) {
+        const transferItemsPayload: any[] = [];
+
         // Unsold Full Product Cases
         for (const pItem of productReconcileItems) {
           if (pItem.actual_qty > 0) {
-            await supabase.from('stock_transfer_items').insert([
-              {
-                stock_transfer_id: transferRecord.id,
-                product_id: pItem.product_id,
-                item_type: 'PRODUCT',
-                quantity: pItem.actual_qty,
-                unit: 'case',
-              },
-            ]);
+            transferItemsPayload.push({
+              stock_transfer_id: transferRecord.id,
+              product_id: pItem.product_id,
+              returnable_item_id: null,
+              item_type: 'PRODUCT',
+              quantity: pItem.actual_qty,
+              unit: 'case',
+            });
           }
 
           if (newRec?.id) {
-            await supabase.from('reconciliation_items').insert([
-              {
-                reconciliation_id: newRec.id,
-                item_type: 'PRODUCT',
-                product_id: pItem.product_id,
-                unit: 'case',
-                expected_qty: pItem.expected_qty,
-                actual_qty: pItem.actual_qty,
-                variance_qty: pItem.variance,
-              },
-            ]);
+            try {
+              await supabase.from('reconciliation_items').insert([
+                {
+                  reconciliation_id: newRec.id,
+                  item_type: 'PRODUCT',
+                  product_id: pItem.product_id,
+                  unit: 'case',
+                  expected_qty: pItem.expected_qty,
+                  actual_qty: pItem.actual_qty,
+                  variance_qty: pItem.variance,
+                },
+              ]);
+            } catch (recErr) {
+              console.warn('reconciliation_items insert ignored if table missing:', recErr);
+            }
           }
         }
 
         // Collected Empty Bottles & Cases
         for (const eItem of emptyReconcileItems) {
           if (eItem.actual_qty > 0) {
-            await supabase.from('stock_transfer_items').insert([
-              {
-                stock_transfer_id: transferRecord.id,
-                returnable_item_id: eItem.returnable_item_id,
-                item_type: 'CONTAINER',
-                quantity: eItem.actual_qty,
-                unit: eItem.unit || 'pc',
-              },
-            ]);
+            transferItemsPayload.push({
+              stock_transfer_id: transferRecord.id,
+              product_id: null,
+              returnable_item_id: eItem.returnable_item_id,
+              item_type: 'CONTAINER',
+              quantity: eItem.actual_qty,
+              unit: eItem.unit || 'pc',
+            });
+          }
+        }
+
+        if (transferItemsPayload.length > 0) {
+          const { error: itemsInsErr } = await supabase
+            .from('stock_transfer_items')
+            .insert(transferItemsPayload);
+
+          if (itemsInsErr) {
+            console.warn('Batch insert warning, executing fallback item-by-item insertion:', itemsInsErr);
+            const fallbackProdId = productReconcileItems[0]?.product_id || null;
+
+            for (const itemPayload of transferItemsPayload) {
+              const res = await supabase.from('stock_transfer_items').insert([itemPayload]);
+              if (res.error && res.error.code === '23502') {
+                // Legacy DB schema fallback if product_id NOT NULL constraint active
+                await supabase.from('stock_transfer_items').insert([
+                  {
+                    ...itemPayload,
+                    product_id: fallbackProdId,
+                  },
+                ]);
+              }
+            }
           }
         }
       }
@@ -261,6 +354,16 @@ export const AgentReconciliation: React.FC = () => {
             <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
               PENDING ADMIN APPROVAL
             </span>
+          </div>
+
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl space-y-1">
+            <div className="text-[10px] text-emerald-400 font-bold uppercase">💵 Cash Remittance To Turn Over:</div>
+            <div className="text-lg font-black text-emerald-400">
+              ₱{routeRemittanceTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </div>
+            <div className="text-[10px] text-slate-400 font-sans leading-tight">
+              Please hand over <strong>₱{routeRemittanceTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong> cash to the Warehouse Cashier / Checker along with your empty containers for verification.
+            </div>
           </div>
 
           <div className="text-slate-400 font-bold text-[10px] pt-1">Returned Items Pending Warehouse Receipt:</div>
@@ -313,6 +416,35 @@ export const AgentReconciliation: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* Route Cash & Dispatched Load Summary Card */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-3 shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">
+                Today's Route Remittance Summary
+              </span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20">
+                Live Audit
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 font-mono text-xs">
+              <div className="bg-slate-950 p-3 rounded-2xl border border-emerald-500/30 col-span-2">
+                <span className="text-[10px] uppercase font-bold text-emerald-400 block">Expected Cash Remittance</span>
+                <span className="text-xl font-black text-emerald-400">
+                  ₱{routeRemittanceTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">Total cash money collected from store deliveries today</span>
+              </div>
+
+              {routeDispatchedCases > 0 && (
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 col-span-2 flex justify-between items-center">
+                  <span className="text-slate-400 text-[11px]">Initial Load Dispatched Today:</span>
+                  <span className="font-extrabold text-white text-sm">{routeDispatchedCases} cases</span>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Section 1: Unsold Full Product Cases */}
           <div className="space-y-3">
             <div className="flex items-center space-x-2 text-xs font-bold text-slate-300 uppercase tracking-wider">

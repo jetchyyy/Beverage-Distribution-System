@@ -275,6 +275,37 @@ export const AdminDashboard: React.FC = () => {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
           <h3 className="font-bold text-white text-lg border-b border-slate-800 pb-3">Distributor Summary</h3>
 
+          {/* Live Warehouse & Fleet Breakdown */}
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-300">
+              <span>Inventory Allocation</span>
+              <Link to="/admin/warehouse" className="text-indigo-400 hover:underline">View Depot</Link>
+            </div>
+
+            <div className="space-y-2 text-xs font-mono">
+              <div className="flex justify-between items-center bg-slate-900 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <WarehouseIcon className="w-3.5 h-3.5 text-indigo-400" />
+                  Main Warehouse Depot:
+                </span>
+                <span className="font-bold text-emerald-400 text-sm">{warehouseStock.toLocaleString()} cs</span>
+              </div>
+
+              <div className="flex justify-between items-center bg-slate-900 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <Truck className="w-3.5 h-3.5 text-cyan-400" />
+                  Loaded on Truck Fleet:
+                </span>
+                <span className="font-bold text-cyan-400 text-sm">{truckStock.toLocaleString()} cs</span>
+              </div>
+
+              <div className="flex justify-between items-center bg-indigo-950/40 p-2.5 rounded-lg border border-indigo-500/30 text-white font-bold">
+                <span className="text-indigo-300">Total System Stock:</span>
+                <span className="text-white text-sm">{(warehouseStock + truckStock).toLocaleString()} cs</span>
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-4">
             <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800">
               <div className="flex items-center space-x-3">

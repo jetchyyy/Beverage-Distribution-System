@@ -19,6 +19,8 @@ import {
   X,
   Warehouse,
   ShieldCheck,
+  Users,
+  Tag,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
@@ -27,7 +29,7 @@ interface AdminLayoutProps {
 }
 
 export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
-  const { profile, signOut, isSuperAdmin, isTenantAdmin, isAgent } = useAuth();
+  const { profile, signOut, isSuperAdmin, isTenantAdmin, isAgent, hasFeatureAccess } = useAuth();
   const { tenant } = useTenant();
   const location = useLocation();
   const navigate = useNavigate();
@@ -40,19 +42,24 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     }
   }, [profile, isAgent, isTenantAdmin, navigate]);
 
-  const navItems = [
-    { label: 'Dashboard', path: '/admin', icon: LayoutDashboard },
-    { label: 'Products & Packaging', path: '/admin/products', icon: Package },
-    { label: 'Warehouse Inventory', path: '/admin/warehouse', icon: Warehouse },
-    { label: 'Stock Transfers', path: '/admin/transfers', icon: ArrowRightLeft },
-    { label: 'Agents & Trucks', path: '/admin/agents-trucks', icon: Truck },
-    { label: 'Micro Stores', path: '/admin/stores', icon: Store },
-    { label: 'Deliveries & Sales', path: '/admin/sales', icon: ShoppingBag },
-    { label: 'Returnables & PUNDO', path: '/admin/pundo', icon: RotateCcw },
-    { label: 'Suppliers & Receipts', path: '/admin/purchasing', icon: Building2 },
-    { label: 'Reports & Audits', path: '/admin/reports', icon: BarChart3 },
-    { label: 'Tenant Settings', path: '/admin/settings', icon: Settings },
+  const allNavItems = [
+    { label: 'Dashboard', path: '/admin', icon: LayoutDashboard, featureKey: 'dashboard' },
+    { label: 'Products & Packaging', path: '/admin/products', icon: Package, featureKey: 'products' },
+    { label: 'Warehouse Inventory', path: '/admin/warehouse', icon: Warehouse, featureKey: 'warehouse' },
+    { label: 'Stock Transfers', path: '/admin/transfers', icon: ArrowRightLeft, featureKey: 'transfers' },
+    { label: 'Stock In', path: '/admin/purchasing', icon: Building2, featureKey: 'stock_in' },
+    { label: 'Promos & Claims', path: '/admin/promotions', icon: Tag, featureKey: 'promotions' },
+    { label: 'Agents & Trucks', path: '/admin/agents-trucks', icon: Truck, featureKey: 'agents' },
+    { label: 'Micro Stores', path: '/admin/stores', icon: Store, featureKey: 'stores' },
+    { label: 'Deliveries & Sales', path: '/admin/sales', icon: ShoppingBag, featureKey: 'sales' },
+    { label: 'Returnables & PUNDO', path: '/admin/pundo', icon: RotateCcw, featureKey: 'pundo' },
+    { label: 'Reports & Audits', path: '/admin/reports', icon: BarChart3, featureKey: 'reports' },
+    { label: 'User Management', path: '/admin/users', icon: Users, featureKey: 'users' },
+    { label: 'Tenant Settings', path: '/admin/settings', icon: Settings, featureKey: 'settings' },
   ];
+
+  // Filter sidebar navigation items based on user feature permissions
+  const navItems = allNavItems.filter((item) => hasFeatureAccess(item.featureKey));
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">

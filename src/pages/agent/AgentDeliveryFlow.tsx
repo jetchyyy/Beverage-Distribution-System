@@ -27,6 +27,8 @@ export const AgentDeliveryFlow: React.FC = () => {
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const [promotionsCatalog, setPromotionsCatalog] = useState<any[]>([]);
+
   const fetchDeliveryData = async () => {
     if (!tenant) return;
     try {
@@ -35,6 +37,13 @@ export const AgentDeliveryFlow: React.FC = () => {
 
       const { data: rets } = await supabase.from('returnable_items').select('*').eq('tenant_id', tenant.id);
       setReturnableCatalog(rets || []);
+
+      const { data: promos } = await supabase
+        .from('promotions')
+        .select('*')
+        .eq('tenant_id', tenant.id)
+        .eq('is_active', true);
+      setPromotionsCatalog(promos || []);
 
       const { data: trkData } = await supabase
         .from('trucks')
@@ -279,33 +288,95 @@ export const AgentDeliveryFlow: React.FC = () => {
       }
       sale = insertRes.data;
 
-      // 2. Insert Delivered Sale Items
+      // 2. Insert Delivered Sale Items & Supplier Promo Claims
       if (sale?.id) {
+        const saleItemsPayload: any[] = [];
+        const promoClaimsPayload: any[] = [];
+
         for (const [prodId, val] of cart.entries()) {
-          try {
-            await supabase.from('sale_items').insert([
-              {
+          // Paid Line Item
+          saleItemsPayload.push({
+            sale_id: sale.id,
+            product_id: prodId,
+            quantity: val.qtyCases,
+            unit_price: val.casePrice,
+            subtotal: val.qtyCases * val.casePrice,
+            unit: 'case',
+            is_promo_free: false,
+          });
+
+          // Check if product qualifies for active promo (e.g. 5+1 deal)
+          const activePromo = promotionsCatalog.find((p) => p.buy_product_id === prodId && p.is_active);
+          if (activePromo) {
+            const buyQty = Number(activePromo.buy_quantity || 5);
+            const freeQtyPerDeal = Number(activePromo.free_quantity || 1);
+            const promoDeals = Math.floor(val.qtyCases / buyQty);
+            const totalFreeCases = promoDeals * freeQtyPerDeal;
+
+            if (totalFreeCases > 0) {
+              // Promo Free Line Item
+              saleItemsPayload.push({
                 sale_id: sale.id,
-                product_id: prodId,
-                quantity: val.qtyCases,
-                unit_price: val.casePrice,
-                subtotal: val.qtyCases * val.casePrice,
+                product_id: activePromo.free_product_id || prodId,
+                quantity: totalFreeCases,
+                unit_price: 0,
+                subtotal: 0,
                 unit: 'case',
-              },
-            ]);
-          } catch (itemErr) {
-            console.warn('sale_items insert ignored if table missing:', itemErr);
+                is_promo_free: true,
+                promo_id: activePromo.id,
+              });
+
+              // Supplier Claim Ledger Entry
+              promoClaimsPayload.push({
+                tenant_id: tenant.id,
+                promo_id: activePromo.id,
+                supplier_id: activePromo.supplier_id || null,
+                sale_id: sale.id,
+                micro_store_id: selectedStore.id,
+                agent_id: activeAgentId,
+                truck_id: truck.id,
+                qualifying_cases_sold: val.qtyCases,
+                free_cases_awarded: totalFreeCases,
+                claim_rate: Number(activePromo.claim_rate || 720),
+                total_claim_amount: totalFreeCases * Number(activePromo.claim_rate || 720),
+                status: 'PENDING_CLAIM',
+              });
+            }
+          }
+        }
+
+        if (saleItemsPayload.length > 0) {
+          const { error: sItemsErr } = await supabase.from('sale_items').insert(saleItemsPayload);
+          if (sItemsErr) {
+            console.error('Error inserting sale_items:', sItemsErr);
+          }
+        }
+
+        if (promoClaimsPayload.length > 0) {
+          const { error: claimErr } = await supabase.from('supplier_promo_claims').insert(promoClaimsPayload);
+          if (claimErr) {
+            console.error('Error inserting supplier_promo_claims:', claimErr);
           }
         }
       }
 
-      // 3. Deduct Truck Inventory Balance (Full Cases)
+      // 3. Deduct Truck Inventory Balance (Paid Cases + Promo Free Cases)
       for (const [prodId, val] of cart.entries()) {
         const bal = truckBalances.find((b) => b.product_id === prodId);
         if (bal) {
+          let totalDeductCases = val.qtyCases;
+
+          const activePromo = promotionsCatalog.find((p) => p.buy_product_id === prodId && p.is_active);
+          if (activePromo) {
+            const buyQty = Number(activePromo.buy_quantity || 5);
+            const freeQtyPerDeal = Number(activePromo.free_quantity || 1);
+            const promoDeals = Math.floor(val.qtyCases / buyQty);
+            totalDeductCases += promoDeals * freeQtyPerDeal;
+          }
+
           await supabase
             .from('inventory_balances')
-            .update({ quantity: Math.max(0, Number(bal.quantity) - val.qtyCases) })
+            .update({ quantity: Math.max(0, Number(bal.quantity) - totalDeductCases) })
             .eq('id', bal.id);
         }
       }
@@ -536,41 +607,68 @@ export const AgentDeliveryFlow: React.FC = () => {
                 const maxStock = Number(bal.quantity || 0);
 
                 return (
-                  <div key={bal.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
-                    <div>
-                      <h4 className="font-bold text-white text-base">{prod?.name}</h4>
-                      <p className="text-xs text-slate-400">
-                        Available: <strong className="text-emerald-400 font-mono">{maxStock} cases</strong> (1 case = {units} btls)
-                      </p>
-                    </div>
+                  <div key={bal.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h4 className="font-bold text-white text-base">{prod?.name}</h4>
+                        <p className="text-xs text-slate-400">
+                          Available: <strong className="text-emerald-400 font-mono">{maxStock} cases</strong> (1 case = {units} btls)
+                        </p>
 
-                    <div className="flex items-center space-x-2 bg-slate-950 px-2 py-1.5 rounded-2xl border border-slate-800">
-                      <button
-                        onClick={() => updateCartQty(bal, -1)}
-                        className="w-9 h-9 rounded-xl bg-slate-800 text-white flex items-center justify-center font-bold shrink-0 active:scale-95"
-                      >
-                        <Minus className="w-4 h-4" />
-                      </button>
+                        {/* Active Promo Badge */}
+                        {(() => {
+                          const activePromo = promotionsCatalog.find((p) => p.buy_product_id === prod.id && p.is_active);
+                          if (!activePromo) return null;
 
-                      <input
-                        type="number"
-                        min="0"
-                        max={maxStock}
-                        value={currentQty === 0 ? '' : currentQty}
-                        placeholder="0"
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value, 10);
-                          setCartQtyDirect(bal, isNaN(val) ? 0 : val);
-                        }}
-                        className="w-14 text-center font-extrabold text-lg text-white font-mono bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded-lg py-1 border border-slate-800"
-                      />
+                          const buyQty = Number(activePromo.buy_quantity || 5);
+                          const freeQtyPerDeal = Number(activePromo.free_quantity || 1);
+                          const deals = Math.floor(currentQty / buyQty);
+                          const freeCs = deals * freeQtyPerDeal;
 
-                      <button
-                        onClick={() => updateCartQty(bal, 1)}
-                        className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold shrink-0 active:scale-95"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
+                          return (
+                            <div className="mt-1 space-y-1">
+                              <span className="text-[10px] font-mono font-bold text-pink-400 bg-pink-500/10 border border-pink-500/20 px-2 py-0.5 rounded-lg inline-flex items-center gap-1">
+                                🎉 PROMO: Buy {buyQty} cs $\rightarrow$ Get +{freeQtyPerDeal} cs FREE (San Miguel Funded)
+                              </span>
+
+                              {freeCs > 0 && (
+                                <div className="text-[11px] font-mono font-extrabold text-emerald-400">
+                                  🎁 +{freeCs} FREE Promo Cases automatically added at ₱0.00!
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      <div className="flex items-center space-x-2 bg-slate-950 px-2 py-1.5 rounded-2xl border border-slate-800 shrink-0">
+                        <button
+                          onClick={() => updateCartQty(bal, -1)}
+                          className="w-9 h-9 rounded-xl bg-slate-800 text-white flex items-center justify-center font-bold shrink-0 active:scale-95"
+                        >
+                          <Minus className="w-4 h-4" />
+                        </button>
+
+                        <input
+                          type="number"
+                          min="0"
+                          max={maxStock}
+                          value={currentQty === 0 ? '' : currentQty}
+                          placeholder="0"
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setCartQtyDirect(bal, isNaN(val) ? 0 : val);
+                          }}
+                          className="w-14 text-center font-extrabold text-lg text-white font-mono bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded-lg py-1 border border-slate-800"
+                        />
+
+                        <button
+                          onClick={() => updateCartQty(bal, 1)}
+                          className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold shrink-0 active:scale-95"
+                        >
+                          <Plus className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );

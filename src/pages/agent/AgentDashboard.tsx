@@ -21,52 +21,76 @@ export const AgentDashboard: React.FC = () => {
   const fetchAgentDashboard = async () => {
     if (!tenant) return;
     try {
-      const { data: agData } = await supabase
-        .from('agents')
-        .select('*, trucks(*)')
-        .eq('tenant_id', tenant.id)
-        .eq('profile_id', profile?.id || '')
-        .single();
+      // 1. Resolve Assigned Truck for Tenant / Agent User
+      let targetTruck: any = null;
 
-      if (agData?.trucks) {
-        setTruckCode(agData.trucks.truck_code);
-        const locId = agData.trucks.location_id;
-
-        if (locId) {
-          const { data: bals } = await supabase
-            .from('inventory_balances')
-            .select('*, products(name, sku)')
-            .eq('location_id', locId);
-
-          let sum = 0;
-          bals?.forEach((b) => (sum += Number(b.quantity || 0)));
-          setTruckStockCount(sum);
-          setTruckInventoryItems(bals || []);
-        }
-      } else {
-        const { data: firstTruck } = await supabase
-          .from('trucks')
-          .select('*, locations(*)')
+      if (profile?.id) {
+        const { data: agData } = await supabase
+          .from('agents')
+          .select('*, trucks(*)')
           .eq('tenant_id', tenant.id)
+          .eq('user_id', profile.id)
           .limit(1)
-          .single();
+          .maybeSingle();
 
-        if (firstTruck) {
-          setTruckCode(firstTruck.truck_code);
-          if (firstTruck.location_id) {
-            const { data: bals } = await supabase
-              .from('inventory_balances')
-              .select('*, products(name, sku)')
-              .eq('location_id', firstTruck.location_id);
-
-            let sum = 0;
-            bals?.forEach((b) => (sum += Number(b.quantity || 0)));
-            setTruckStockCount(sum);
-            setTruckInventoryItems(bals || []);
-          }
+        if (agData?.trucks) {
+          targetTruck = agData.trucks;
         }
       }
 
+      if (!targetTruck) {
+        const { data: firstTruck } = await supabase
+          .from('trucks')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .limit(1)
+          .maybeSingle();
+
+        targetTruck = firstTruck;
+      }
+
+      if (targetTruck && targetTruck.location_id) {
+        setTruckCode(targetTruck.truck_code);
+        const locId = targetTruck.location_id;
+
+        // Fetch Full Product Cases loaded on Truck
+        const { data: bals } = await supabase
+          .from('inventory_balances')
+          .select('*, products(name, sku)')
+          .eq('location_id', locId);
+
+        const activeProds = (bals || []).filter((b) => Number(b.quantity || 0) > 0);
+        let sumCases = 0;
+        activeProds.forEach((b) => (sumCases += Number(b.quantity || 0)));
+        setTruckStockCount(sumCases);
+        setTruckInventoryItems(activeProds);
+
+        // Fetch Empty Bottles & Cases collected on Truck
+        const { data: rBals } = await supabase
+          .from('returnable_balances')
+          .select('*, returnable_items(name, item_type, type)')
+          .eq('location_id', locId);
+
+        let btlCount = 0;
+        let caseCount = 0;
+
+        (rBals || []).forEach((rb) => {
+          const qty = Number(rb.quantity || 0);
+          const itemType = rb.returnable_items?.item_type || rb.returnable_items?.type || 'BOTTLE';
+          if (qty > 0) {
+            if (itemType === 'BOTTLE') {
+              btlCount += qty;
+            } else if (itemType === 'CASE' || itemType === 'CRATE') {
+              caseCount += qty;
+            }
+          }
+        });
+
+        setTodayBottlesCollected(btlCount);
+        setTodayCasesCollected(caseCount);
+      }
+
+      // 2. Fetch Today's Sales
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
 
@@ -80,23 +104,6 @@ export const AgentDashboard: React.FC = () => {
       salesToday?.forEach((s) => (sTotal += Number(s.total || 0)));
       setTodaySalesTotal(sTotal);
       setTodayStoresCount(salesToday?.length || 0);
-
-      const { data: retTxs } = await supabase
-        .from('returnable_transactions')
-        .select('*, returnable_transaction_items(*, returnable_items(type))')
-        .eq('tenant_id', tenant.id)
-        .gte('created_at', todayStart.toISOString());
-
-      let btlCount = 0;
-      let caseCount = 0;
-      retTxs?.forEach((tx) => {
-        tx.returnable_transaction_items?.forEach((item: any) => {
-          if (item.returnable_items?.type === 'BOTTLE') btlCount += Number(item.quantity || 0);
-          if (item.returnable_items?.type === 'CASE') caseCount += Number(item.quantity || 0);
-        });
-      });
-      setTodayBottlesCollected(btlCount);
-      setTodayCasesCollected(caseCount);
     } catch (err) {
       console.error('Error fetching agent dashboard:', err);
     }
@@ -104,7 +111,7 @@ export const AgentDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchAgentDashboard();
-  }, [tenant]);
+  }, [tenant, profile]);
 
   return (
     <div className="space-y-6">
@@ -140,12 +147,18 @@ export const AgentDashboard: React.FC = () => {
         <h2 className="text-sm font-extrabold text-slate-400 uppercase tracking-wider font-mono">Today's Summary</h2>
 
         <div className="grid grid-cols-2 gap-3.5">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-            <div className="text-[10px] font-bold text-slate-400 uppercase">Sales Amount</div>
+          <div
+            onClick={() => navigate('/agent/sales-history')}
+            className="bg-slate-900 border border-slate-800 hover:border-indigo-500/50 rounded-2xl p-4 cursor-pointer transition-all shadow-md group"
+          >
+            <div className="text-[10px] font-bold text-slate-400 uppercase flex justify-between items-center">
+              <span>Sales Amount</span>
+              <span className="text-[9px] text-indigo-400 group-hover:underline">View History →</span>
+            </div>
             <div className="text-xl font-black text-emerald-400 mt-1 font-mono">
               ₱{todaySalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </div>
-            <div className="text-[10px] text-slate-500 mt-0.5">{todayStoresCount} stores served</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">{todayStoresCount} stores served today</div>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">

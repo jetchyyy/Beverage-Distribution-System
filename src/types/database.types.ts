@@ -40,6 +40,7 @@ export interface Profile {
   email: string;
   role: UserRole;
   phone?: string | null;
+  allowed_features?: string[] | null;
   status: 'ACTIVE' | 'INACTIVE';
   created_at: string;
   updated_at: string;
@@ -225,3 +226,99 @@ export interface PundoLedger {
   reference_id?: string | null;
   created_at: string;
 }
+
+export interface StockTransfer {
+  id: string;
+  tenant_id: string;
+  transfer_number: string;
+  from_location_id?: string | null;
+  to_location_id?: string | null;
+  status: 'DRAFT' | 'PENDING' | 'IN_TRANSIT' | 'COMPLETED' | 'CONFIRMED' | 'CANCELLED';
+  transfer_type?: string | null;
+  notes?: string | null;
+  expected_cash_remittance?: number | null;
+  actual_cash_remitted?: number | null;
+  remittance_variance?: number | null;
+  remittance_received_by?: string | null;
+  remittance_status?: string | null;
+  remittance_notes?: string | null;
+  created_at: string;
+}
+
+export interface StockTransferItem {
+  id: string;
+  stock_transfer_id: string;
+  product_id?: string | null;
+  returnable_item_id?: string | null;
+  item_type?: 'PRODUCT' | 'CONTAINER' | string | null;
+  quantity: number;
+  unit?: string | null;
+  created_at: string;
+}
+
+export interface StockInReceipt {
+  id: string;
+  tenant_id: string;
+  control_number: string;
+  supplier_id?: string | null;
+  supplier_name?: string | null;
+  reference_number?: string | null;
+  total_cases: number;
+  total_amount: number;
+  notes?: string | null;
+  received_by?: string | null;
+  created_at: string;
+}
+
+export interface StockInItem {
+  id: string;
+  stock_in_receipt_id: string;
+  product_id: string;
+  batch_number: string;
+  manufacture_date?: string | null;
+  expiry_date: string;
+  quantity_cases: number;
+  unit_price: number;
+  subtotal: number;
+  created_at: string;
+}
+
+export interface Promotion {
+  id: string;
+  tenant_id: string;
+  supplier_id?: string | null;
+  promo_code: string;
+  promo_name: string;
+  promo_type: string;
+  buy_product_id: string;
+  buy_quantity: number;
+  free_product_id: string;
+  free_quantity: number;
+  claim_rate: number;
+  start_date?: string | null;
+  end_date?: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface SupplierPromoClaim {
+  id: string;
+  tenant_id: string;
+  promo_id?: string | null;
+  supplier_id?: string | null;
+  sale_id?: string | null;
+  micro_store_id?: string | null;
+  agent_id?: string | null;
+  truck_id?: string | null;
+  qualifying_cases_sold: number;
+  free_cases_awarded: number;
+  claim_rate: number;
+  total_claim_amount: number;
+  status: 'PENDING_CLAIM' | 'BILLED' | 'REIMBURSED' | string;
+  settlement_type?: string | null;
+  settled_at?: string | null;
+  settlement_notes?: string | null;
+  created_at: string;
+}
+
+
