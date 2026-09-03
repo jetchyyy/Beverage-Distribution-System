@@ -542,15 +542,24 @@ DO UPDATE SET
                           {/* Subdomain */}
                           <td className="px-6 py-4 font-mono text-xs">
                             <div className="space-y-1">
-                              <a
-                                href={`http://${t.slug}.localhost:5173`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-pink-400 hover:underline flex items-center space-x-1"
-                              >
-                                <span>{t.slug}.{domainName}</span>
-                                <ExternalLink className="w-3 h-3 opacity-70" />
-                              </a>
+                              {(() => {
+                                const isLocal = window.location.hostname.includes('localhost') || window.location.hostname.includes('127.0.0.1');
+                                const tenantUrl = isLocal
+                                  ? `http://${t.slug}.localhost:${window.location.port || '5173'}`
+                                  : `https://${t.slug}.${domainName}`;
+
+                                return (
+                                  <a
+                                    href={tenantUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-pink-400 hover:underline flex items-center space-x-1"
+                                  >
+                                    <span>{t.slug}.{domainName}</span>
+                                    <ExternalLink className="w-3 h-3 opacity-70" />
+                                  </a>
+                                );
+                              })()}
                             </div>
                           </td>
 
