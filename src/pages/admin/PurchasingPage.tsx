@@ -160,8 +160,6 @@ export const PurchasingPage: React.FC = () => {
       const totalAmount = qtyCases * unitCost;
 
       // 2. Create Stock In Receipt Record
-      let stockInId: string | null = null;
-
       const { data: newStIn, error: stInErr } = await supabase
         .from('stock_in_receipts')
         .insert([
@@ -181,7 +179,6 @@ export const PurchasingPage: React.FC = () => {
         .maybeSingle();
 
       if (!stInErr && newStIn) {
-        stockInId = newStIn.id;
         // Insert item line
         await supabase.from('stock_in_items').insert([
           {
@@ -214,7 +211,6 @@ export const PurchasingPage: React.FC = () => {
           .single();
 
         if (oldRcpt) {
-          stockInId = oldRcpt.id;
           await supabase.from('purchase_receipt_items').insert([
             {
               purchase_receipt_id: oldRcpt.id,
