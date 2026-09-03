@@ -9,13 +9,6 @@ import {
   Phone,
   MapPin,
   History,
-  ShoppingBag,
-  DollarSign,
-  Package,
-  Calendar,
-  Eye,
-  FileText,
-  Clock,
 } from 'lucide-react';
 
 export const MicroStoresPage: React.FC = () => {
@@ -112,7 +105,7 @@ export const MicroStoresPage: React.FC = () => {
       setOwnerName('');
       setPhone('');
       setAddress('');
-      fetchStores();
+      fetchStoresData();
     } catch (err: any) {
       setError(err.message || 'Failed to create micro store.');
     } finally {

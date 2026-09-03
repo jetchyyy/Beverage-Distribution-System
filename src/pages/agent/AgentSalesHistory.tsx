@@ -8,15 +8,15 @@ import {
   ShoppingBag,
   Store,
   DollarSign,
-  Calendar,
+
   Search,
   Eye,
-  CheckCircle,
+
   FileText,
   Clock,
   Printer,
   Package,
-  RotateCcw,
+
 } from 'lucide-react';
 
 export const AgentSalesHistory: React.FC = () => {
@@ -197,31 +197,28 @@ export const AgentSalesHistory: React.FC = () => {
           <div className="flex items-center space-x-1.5 bg-slate-900 p-1 rounded-2xl border border-slate-800">
             <button
               onClick={() => setDateFilter('TODAY')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                dateFilter === 'TODAY'
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${dateFilter === 'TODAY'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200'
-              }`}
+                }`}
             >
               Today
             </button>
             <button
               onClick={() => setDateFilter('YESTERDAY')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                dateFilter === 'YESTERDAY'
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${dateFilter === 'YESTERDAY'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200'
-              }`}
+                }`}
             >
               Yesterday
             </button>
             <button
               onClick={() => setDateFilter('ALL')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                dateFilter === 'ALL'
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${dateFilter === 'ALL'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200'
-              }`}
+                }`}
             >
               All History
             </button>

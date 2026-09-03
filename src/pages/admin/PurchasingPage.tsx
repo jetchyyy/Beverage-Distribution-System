@@ -4,7 +4,7 @@ import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import type { Supplier, Product, Warehouse } from '../../types/database.types';
 import { EmptyState } from '../../components/EmptyState';
-import { Plus, CheckCircle, PackageCheck, FileText, Eye, ShieldCheck, Printer, Calendar } from 'lucide-react';
+import { Plus, PackageCheck, FileText, Eye, Printer, ShieldCheck } from 'lucide-react';
 
 export const PurchasingPage: React.FC = () => {
   const { tenant } = useTenant();
