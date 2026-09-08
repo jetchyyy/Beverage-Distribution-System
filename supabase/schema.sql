@@ -350,3 +350,35 @@ CREATE POLICY product_batches_tenant_policy ON public.product_batches
     )
     OR auth.uid() IS NULL
   );
+
+-- ----------------------------------------------------------------------------
+-- PERFORMANCE INDEXES ON FOREIGN KEYS & QUERY PATHS
+-- ----------------------------------------------------------------------------
+CREATE INDEX IF NOT EXISTS idx_sales_tenant_created ON public.sales(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sales_micro_store ON public.sales(micro_store_id);
+CREATE INDEX IF NOT EXISTS idx_sales_agent ON public.sales(agent_id);
+CREATE INDEX IF NOT EXISTS idx_sales_truck ON public.sales(truck_id);
+CREATE INDEX IF NOT EXISTS idx_sales_created_at ON public.sales(created_at DESC);
+
+ALTER TABLE public.pundo_ledger ADD COLUMN IF NOT EXISTS reference_id UUID;
+
+CREATE INDEX IF NOT EXISTS idx_pundo_ledger_tenant_created ON public.pundo_ledger(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pundo_ledger_store ON public.pundo_ledger(micro_store_id);
+CREATE INDEX IF NOT EXISTS idx_pundo_ledger_item ON public.pundo_ledger(returnable_item_id);
+CREATE INDEX IF NOT EXISTS idx_pundo_ledger_ref ON public.pundo_ledger(reference_id);
+
+CREATE INDEX IF NOT EXISTS idx_inv_balances_tenant_loc ON public.inventory_balances(tenant_id, location_id);
+CREATE INDEX IF NOT EXISTS idx_inv_balances_product ON public.inventory_balances(product_id);
+CREATE INDEX IF NOT EXISTS idx_ret_balances_tenant_loc ON public.returnable_balances(tenant_id, location_id);
+CREATE INDEX IF NOT EXISTS idx_ret_balances_item ON public.returnable_balances(returnable_item_id);
+
+CREATE INDEX IF NOT EXISTS idx_micro_stores_tenant ON public.micro_stores(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_trucks_tenant ON public.trucks(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_agents_tenant ON public.agents(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_suppliers_tenant ON public.suppliers(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_warehouses_tenant ON public.warehouses(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_locations_tenant ON public.locations(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_packaging_tenant_prod ON public.product_packaging(tenant_id, product_id);
+CREATE INDEX IF NOT EXISTS idx_prices_tenant_prod ON public.product_prices(tenant_id, product_id);
+CREATE INDEX IF NOT EXISTS idx_batches_tenant_prod ON public.product_batches(tenant_id, product_id);
+

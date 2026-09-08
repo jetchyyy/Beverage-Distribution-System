@@ -45,39 +45,44 @@ export const WarehousePage: React.FC = () => {
   const fetchInventoryData = async () => {
     if (!tenant) return;
     try {
-      const { data: prods } = await supabase.from('products').select('*').eq('tenant_id', tenant.id).order('name');
-      setProducts(prods || []);
+      const [
+        prodsRes,
+        packsRes,
+        prcsRes,
+        invsRes,
+        retsRes,
+        btchsRes,
+        trksRes,
+        agtsRes,
+      ] = await Promise.all([
+        supabase.from('products').select('*').eq('tenant_id', tenant.id).order('name'),
+        supabase.from('product_packaging').select('*').eq('tenant_id', tenant.id),
+        supabase.from('product_prices').select('*').eq('tenant_id', tenant.id),
+        supabase
+          .from('inventory_balances')
+          .select('*, products(name, sku, category, base_unit), locations(name, type)')
+          .eq('tenant_id', tenant.id),
+        supabase
+          .from('returnable_balances')
+          .select('*, returnable_items(name, type, pundo_value, unit)')
+          .eq('tenant_id', tenant.id),
+        supabase
+          .from('product_batches')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .order('expiry_date', { ascending: true }),
+        supabase.from('trucks').select('*').eq('tenant_id', tenant.id),
+        supabase.from('agents').select('*').eq('tenant_id', tenant.id),
+      ]);
 
-      const { data: packs } = await supabase.from('product_packaging').select('*').eq('tenant_id', tenant.id);
-      setPackagings(packs || []);
-
-      const { data: prcs } = await supabase.from('product_prices').select('*').eq('tenant_id', tenant.id);
-      setPrices(prcs || []);
-
-      const { data: invs } = await supabase
-        .from('inventory_balances')
-        .select('*, products(name, sku, category, base_unit), locations(name, type)')
-        .eq('tenant_id', tenant.id);
-      setInventoryBalances(invs || []);
-
-      const { data: rets } = await supabase
-        .from('returnable_balances')
-        .select('*, returnable_items(name, type, pundo_value, unit)')
-        .eq('tenant_id', tenant.id);
-      setReturnableBalances(rets || []);
-
-      const { data: btchs } = await supabase
-        .from('product_batches')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .order('expiry_date', { ascending: true });
-      setBatches(btchs || []);
-
-      const { data: trks } = await supabase.from('trucks').select('*').eq('tenant_id', tenant.id);
-      setTrucks(trks || []);
-
-      const { data: agts } = await supabase.from('agents').select('*').eq('tenant_id', tenant.id);
-      setAgents(agts || []);
+      setProducts(prodsRes.data || []);
+      setPackagings(packsRes.data || []);
+      setPrices(prcsRes.data || []);
+      setInventoryBalances(invsRes.data || []);
+      setReturnableBalances(retsRes.data || []);
+      setBatches(btchsRes.data || []);
+      setTrucks(trksRes.data || []);
+      setAgents(agtsRes.data || []);
     } catch (err) {
       console.error('Error fetching inventory:', err);
     }

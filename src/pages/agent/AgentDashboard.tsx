@@ -53,28 +53,38 @@ export const AgentDashboard: React.FC = () => {
         setTruckCode(targetTruck.truck_code);
         const locId = targetTruck.location_id;
 
-        // Fetch Full Product Cases loaded on Truck
-        const { data: bals } = await supabase
-          .from('inventory_balances')
-          .select('*, products(name, sku)')
-          .eq('location_id', locId);
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
 
-        const activeProds = (bals || []).filter((b) => Number(b.quantity || 0) > 0);
+        // Fetch Balances and Today's Sales in parallel
+        const [balsRes, rBalsRes, salesTodayRes] = await Promise.all([
+          supabase
+            .from('inventory_balances')
+            .select('*, products(name, sku)')
+            .eq('location_id', locId),
+          supabase
+            .from('returnable_balances')
+            .select('*, returnable_items(name, item_type, type)')
+            .eq('location_id', locId),
+          supabase
+            .from('sales')
+            .select('total')
+            .eq('tenant_id', tenant.id)
+            .gte('created_at', todayStart.toISOString()),
+        ]);
+
+        const bals = balsRes.data || [];
+        const activeProds = bals.filter((b) => Number(b.quantity || 0) > 0);
         let sumCases = 0;
         activeProds.forEach((b) => (sumCases += Number(b.quantity || 0)));
         setTruckStockCount(sumCases);
         setTruckInventoryItems(activeProds);
 
-        // Fetch Empty Bottles & Cases collected on Truck
-        const { data: rBals } = await supabase
-          .from('returnable_balances')
-          .select('*, returnable_items(name, item_type, type)')
-          .eq('location_id', locId);
-
+        const rBals = rBalsRes.data || [];
         let btlCount = 0;
         let caseCount = 0;
 
-        (rBals || []).forEach((rb) => {
+        rBals.forEach((rb) => {
           const qty = Number(rb.quantity || 0);
           const itemType = rb.returnable_items?.item_type || rb.returnable_items?.type || 'BOTTLE';
           if (qty > 0) {
@@ -88,22 +98,13 @@ export const AgentDashboard: React.FC = () => {
 
         setTodayBottlesCollected(btlCount);
         setTodayCasesCollected(caseCount);
+
+        const salesToday = salesTodayRes.data || [];
+        let sTotal = 0;
+        salesToday.forEach((s) => (sTotal += Number(s.total || 0)));
+        setTodaySalesTotal(sTotal);
+        setTodayStoresCount(salesToday.length);
       }
-
-      // 2. Fetch Today's Sales
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-
-      const { data: salesToday } = await supabase
-        .from('sales')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .gte('created_at', todayStart.toISOString());
-
-      let sTotal = 0;
-      salesToday?.forEach((s) => (sTotal += Number(s.total || 0)));
-      setTodaySalesTotal(sTotal);
-      setTodayStoresCount(salesToday?.length || 0);
     } catch (err) {
       console.error('Error fetching agent dashboard:', err);
     }

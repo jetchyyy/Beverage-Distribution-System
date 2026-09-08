@@ -32,26 +32,27 @@ export const AgentDeliveryFlow: React.FC = () => {
   const fetchDeliveryData = async () => {
     if (!tenant) return;
     try {
-      const { data: st } = await supabase.from('micro_stores').select('*').eq('tenant_id', tenant.id).order('store_name');
-      setStores(st || []);
+      const [stRes, retsRes, promosRes, trkRes] = await Promise.all([
+        supabase.from('micro_stores').select('*').eq('tenant_id', tenant.id).order('store_name'),
+        supabase.from('returnable_items').select('*').eq('tenant_id', tenant.id),
+        supabase
+          .from('promotions')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .eq('is_active', true),
+        supabase
+          .from('trucks')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .limit(1)
+          .maybeSingle(),
+      ]);
 
-      const { data: rets } = await supabase.from('returnable_items').select('*').eq('tenant_id', tenant.id);
-      setReturnableCatalog(rets || []);
+      setStores(stRes.data || []);
+      setReturnableCatalog(retsRes.data || []);
+      setPromotionsCatalog(promosRes.data || []);
 
-      const { data: promos } = await supabase
-        .from('promotions')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .eq('is_active', true);
-      setPromotionsCatalog(promos || []);
-
-      const { data: trkData } = await supabase
-        .from('trucks')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .limit(1)
-        .maybeSingle();
-
+      const trkData = trkRes.data;
       if (trkData) {
         setTruck(trkData);
         if (trkData.location_id) {

@@ -57,31 +57,38 @@ export const ProductsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const fetchCatalogData = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const { data: prods } = await supabase.from('products').select('*').eq('tenant_id', tenant.id).order('name');
-      setProducts(prods || []);
+      const [prodsRes, packsRes, prcsRes, retsRes, invsRes, btchsRes] = await Promise.all([
+        supabase.from('products').select('*').eq('tenant_id', tenant.id).order('name'),
+        supabase.from('product_packaging').select('*').eq('tenant_id', tenant.id),
+        supabase.from('product_prices').select('*').eq('tenant_id', tenant.id),
+        supabase.from('returnable_items').select('*').eq('tenant_id', tenant.id),
+        supabase.from('inventory_balances').select('*').eq('tenant_id', tenant.id),
+        supabase
+          .from('product_batches')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .order('expiry_date', { ascending: true }),
+      ]);
 
-      const { data: packs } = await supabase.from('product_packaging').select('*').eq('tenant_id', tenant.id);
-      setPackagings(packs || []);
+      if (prodsRes.error) console.error('Error fetching products:', prodsRes.error);
+      if (packsRes.error) console.error('Error fetching packagings:', packsRes.error);
+      if (prcsRes.error) console.error('Error fetching prices:', prcsRes.error);
+      if (retsRes.error) console.error('Error fetching returnables:', retsRes.error);
+      if (invsRes.error) console.error('Error fetching inventory:', invsRes.error);
+      if (btchsRes.error) console.error('Error fetching batches:', btchsRes.error);
 
-      const { data: prcs } = await supabase.from('product_prices').select('*').eq('tenant_id', tenant.id);
-      setPrices(prcs || []);
-
-      const { data: rets } = await supabase.from('returnable_items').select('*').eq('tenant_id', tenant.id);
-      setReturnables(rets || []);
-
-      const { data: invs } = await supabase.from('inventory_balances').select('*').eq('tenant_id', tenant.id);
-      setInventoryBalances(invs || []);
-
-      const { data: btchs } = await supabase
-        .from('product_batches')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .order('expiry_date', { ascending: true });
-
-      setBatches(btchs || []);
+      setProducts(prodsRes.data || []);
+      setPackagings(packsRes.data || []);
+      setPrices(prcsRes.data || []);
+      setReturnables(retsRes.data || []);
+      setInventoryBalances(invsRes.data || []);
+      setBatches(btchsRes.data || []);
     } catch (err) {
       console.error('Error fetching catalog data:', err);
     } finally {

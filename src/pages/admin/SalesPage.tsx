@@ -17,38 +17,52 @@ export const SalesPage: React.FC = () => {
   const [pundoEntries, setPundoEntries] = useState<any[]>([]);
 
   const fetchSales = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      // 1. Fetch Product Catalog for product name & case price resolution
-      const { data: prods } = await supabase
-        .from('products')
-        .select('*, product_packaging(*), product_prices(*)')
-        .eq('tenant_id', tenant.id);
-      setProductsCatalog(prods || []);
+      // 1. Fetch Product Catalog, Sales, and Tenant PUNDO Ledger in parallel
+      const [prodsRes, salesRes, ledgersRes] = await Promise.all([
+        supabase
+          .from('products')
+          .select('*, product_packaging(*), product_prices(*)')
+          .eq('tenant_id', tenant.id),
+        supabase
+          .from('sales')
+          .select(`
+            *,
+            micro_stores(store_name, store_code, owner_name),
+            agents(full_name, employee_code),
+            trucks(truck_code, plate_number)
+          `)
+          .eq('tenant_id', tenant.id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('pundo_ledger')
+          .select('*, returnable_items(name, item_type, type, unit)')
+          .eq('tenant_id', tenant.id),
+      ]);
 
-      // 2. Fetch Sales History
-      const { data, error } = await supabase
-        .from('sales')
-        .select(`
-          *,
-          micro_stores(store_name, store_code, owner_name),
-          agents(full_name, employee_code),
-          trucks(truck_code, plate_number)
-        `)
-        .eq('tenant_id', tenant.id)
-        .order('created_at', { ascending: false });
+      if (salesRes.error) throw salesRes.error;
 
-      if (error) throw error;
+      const prods = prodsRes.data || [];
+      const data = salesRes.data || [];
+      const allLedgers = ledgersRes.data || [];
 
-      // 3. Fetch sale_items & pundo_ledger
-      const { data: allItems } = await supabase
-        .from('sale_items')
-        .select('*, products(name, sku, product_packaging(*))');
+      setProductsCatalog(prods);
 
-      const { data: allLedgers } = await supabase
-        .from('pundo_ledger')
-        .select('*, returnable_items(name, item_type, type, unit)');
+      // 2. Fetch sale_items strictly scoped to this tenant's sales
+      const saleIds = data.map((s) => s.id);
+      let allItems: any[] = [];
+      if (saleIds.length > 0) {
+        const { data: itemsData } = await supabase
+          .from('sale_items')
+          .select('*, products(name, sku, product_packaging(*))')
+          .in('sale_id', saleIds);
+        allItems = itemsData || [];
+      }
 
       const enriched = (data || []).map((s) => {
         const items = allItems?.filter((i) => i.sale_id === s.id) || [];

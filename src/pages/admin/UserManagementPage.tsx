@@ -58,7 +58,10 @@ export const UserManagementPage: React.FC = () => {
   const [editFeatures, setEditFeatures] = useState<string[]>([]);
 
   const fetchStaffUsers = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data, error: fetchErr } = await supabase

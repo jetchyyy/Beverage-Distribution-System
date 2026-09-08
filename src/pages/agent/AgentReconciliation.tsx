@@ -24,55 +24,71 @@ export const AgentReconciliation: React.FC = () => {
   const [routeDispatchedCases, setRouteDispatchedCases] = useState(0);
 
   const fetchReconcileData = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      // 1. Resolve Main Warehouse Location
-      const { data: whLoc } = await supabase
-        .from('locations')
-        .select('id')
-        .eq('tenant_id', tenant.id)
-        .eq('type', 'WAREHOUSE')
-        .limit(1)
-        .maybeSingle();
+      // 1. Resolve Warehouse & Truck Locations in parallel
+      const [whRes, trkRes] = await Promise.all([
+        supabase
+          .from('locations')
+          .select('id')
+          .eq('tenant_id', tenant.id)
+          .eq('type', 'WAREHOUSE')
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from('trucks')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      const whLoc = whRes.data;
+      const trk = trkRes.data;
 
       setWarehouseLocationId(whLoc?.id || null);
-
-      // 2. Resolve Truck & Location
-      const { data: trk } = await supabase
-        .from('trucks')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .limit(1)
-        .maybeSingle();
 
       if (trk && trk.location_id) {
         setTruck(trk);
 
-        // Fetch Today's Sales Remittance
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
-        const { data: todaySales } = await supabase
-          .from('sales')
-          .select('total')
-          .eq('tenant_id', tenant.id)
-          .eq('truck_id', trk.id)
-          .gte('created_at', todayStart.toISOString());
+        // 2. Fetch Reconciliation Metrics concurrently
+        const [todaySalesRes, trfTodayRes, prodBalsRes, catRetsRes, retBalsRes] = await Promise.all([
+          supabase
+            .from('sales')
+            .select('total')
+            .eq('tenant_id', tenant.id)
+            .eq('truck_id', trk.id)
+            .gte('created_at', todayStart.toISOString()),
+          supabase
+            .from('stock_transfers')
+            .select('id')
+            .eq('tenant_id', tenant.id)
+            .eq('to_location_id', trk.location_id)
+            .eq('transfer_type', 'WAREHOUSE_TO_TRUCK')
+            .gte('created_at', todayStart.toISOString()),
+          supabase
+            .from('inventory_balances')
+            .select('*, products(name, sku)')
+            .eq('location_id', trk.location_id),
+          supabase.from('returnable_items').select('*').eq('tenant_id', tenant.id),
+          supabase
+            .from('returnable_balances')
+            .select('*, returnable_items(name, item_type, type, unit, pundo_value)')
+            .eq('location_id', trk.location_id),
+        ]);
 
         let remTotal = 0;
-        todaySales?.forEach((s) => (remTotal += Number(s.total || 0)));
+        todaySalesRes.data?.forEach((s) => (remTotal += Number(s.total || 0)));
         setRouteRemittanceTotal(remTotal);
 
-        // Fetch Today's Outbound Dispatches to Truck
-        const { data: trfToday } = await supabase
-          .from('stock_transfers')
-          .select('id')
-          .eq('tenant_id', tenant.id)
-          .eq('to_location_id', trk.location_id)
-          .eq('transfer_type', 'WAREHOUSE_TO_TRUCK')
-          .gte('created_at', todayStart.toISOString());
-
+        const trfToday = trfTodayRes.data;
         if (trfToday && trfToday.length > 0) {
           const trfIds = trfToday.map((t) => t.id);
           const { data: trfItems } = await supabase
@@ -85,13 +101,8 @@ export const AgentReconciliation: React.FC = () => {
           setRouteDispatchedCases(dispCases);
         }
 
-        // Fetch Full Product Cases Loaded on Truck (> 0 qty)
-        const { data: prodBals } = await supabase
-          .from('inventory_balances')
-          .select('*, products(name, sku)')
-          .eq('location_id', trk.location_id);
-
-        const prodItems = (prodBals || [])
+        const prodBals = prodBalsRes.data || [];
+        const prodItems = prodBals
           .filter((b) => Number(b.quantity || 0) > 0)
           .map((b) => ({
             balance_id: b.id,
@@ -105,18 +116,8 @@ export const AgentReconciliation: React.FC = () => {
 
         setProductReconcileItems(prodItems);
 
-        // Fetch catalog returnable_items for tenant
-        const { data: catRets } = await supabase
-          .from('returnable_items')
-          .select('*')
-          .eq('tenant_id', tenant.id);
-
-        // Fetch Empty Bottles & Cases Collected on Truck
-        const { data: retBals } = await supabase
-          .from('returnable_balances')
-          .select('*, returnable_items(name, item_type, type, unit, pundo_value)')
-          .eq('location_id', trk.location_id);
-
+        const catRets = catRetsRes.data || [];
+        const retBals = retBalsRes.data || [];
         const emptyItemsMap = new Map<string, any>();
 
         (catRets || []).forEach((rItem) => {

@@ -11,7 +11,10 @@ export const AgentTruckStock: React.FC = () => {
   const [truckCode, setTruckCode] = useState('');
 
   const fetchTruckInventory = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data: trkData } = await supabase
@@ -24,22 +27,21 @@ export const AgentTruckStock: React.FC = () => {
       if (trkData && trkData.location_id) {
         setTruckCode(trkData.truck_code);
 
-        const { data: pBals } = await supabase
-          .from('inventory_balances')
-          .select('*, products(*)')
-          .eq('location_id', trkData.location_id);
+        const [pBalsRes, rBalsRes] = await Promise.all([
+          supabase
+            .from('inventory_balances')
+            .select('*, products(*)')
+            .eq('location_id', trkData.location_id),
+          supabase
+            .from('returnable_balances')
+            .select('*, returnable_items(*)')
+            .eq('location_id', trkData.location_id),
+        ]);
 
-        // Filter out zero quantity items
-        const activeProds = (pBals || []).filter((b) => Number(b.quantity || 0) > 0);
+        const activeProds = (pBalsRes.data || []).filter((b) => Number(b.quantity || 0) > 0);
         setProductBalances(activeProds);
 
-        const { data: rBals } = await supabase
-          .from('returnable_balances')
-          .select('*, returnable_items(*)')
-          .eq('location_id', trkData.location_id);
-
-        // Filter out zero quantity returnable containers
-        const activeRets = (rBals || []).filter((b) => Number(b.quantity || 0) > 0);
+        const activeRets = (rBalsRes.data || []).filter((b) => Number(b.quantity || 0) > 0);
         setReturnableBalances(activeRets);
       }
     } catch (err) {

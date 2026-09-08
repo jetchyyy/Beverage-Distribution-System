@@ -9,15 +9,23 @@ export const AgentPundoView: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   const fetchPundoBalances = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const { data: stores } = await supabase.from('micro_stores').select('*').eq('tenant_id', tenant.id).order('store_name');
-      const { data: ledgerEntries } = await supabase
-        .from('pundo_ledger')
-        .select('*, returnable_items(*)')
-        .eq('tenant_id', tenant.id)
-        .order('created_at', { ascending: false });
+      const [storesRes, ledgerRes] = await Promise.all([
+        supabase.from('micro_stores').select('*').eq('tenant_id', tenant.id).order('store_name'),
+        supabase
+          .from('pundo_ledger')
+          .select('*, returnable_items(*)')
+          .eq('tenant_id', tenant.id)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      const stores = storesRes.data || [];
+      const ledgerEntries = ledgerRes.data || [];
 
       const storeMap = new Map<string, any>();
       stores?.forEach((st) => {

@@ -41,56 +41,36 @@ export const PurchasingPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const { data: sups } = await supabase.from('suppliers').select('*').eq('tenant_id', tenant.id);
-      setSuppliers(sups || []);
-
-      const { data: whs } = await supabase.from('warehouses').select('*').eq('tenant_id', tenant.id);
-      setWarehouses(whs || []);
-
-      const { data: prods } = await supabase.from('products').select('*').eq('tenant_id', tenant.id);
-      setProducts(prods || []);
-
-      // Fetch Stock In Receipts with fallback to purchase_receipts
-      const { data: stInRes, error: stInErr } = await supabase
-        .from('stock_in_receipts')
-        .select(`
-          *,
-          suppliers(name),
-          stock_in_items(*, products(name, sku))
-        `)
-        .eq('tenant_id', tenant.id)
-        .order('created_at', { ascending: false });
-
-      if (!stInErr && stInRes && stInRes.length > 0) {
-        setStockInReceipts(stInRes);
-      } else {
-        // Fallback fetch purchase_receipts
-        const { data: oldRcpts } = await supabase
-          .from('purchase_receipts')
+      const [supsRes, whsRes, prodsRes, stInRes] = await Promise.all([
+        supabase.from('suppliers').select('*').eq('tenant_id', tenant.id).order('name'),
+        supabase.from('warehouses').select('*').eq('tenant_id', tenant.id),
+        supabase.from('products').select('*').eq('tenant_id', tenant.id).order('name'),
+        supabase
+          .from('stock_in_receipts')
           .select(`
             *,
             suppliers(name),
-            warehouses(name),
-            purchase_receipt_items(*, products(name, sku))
+            stock_in_items(*, products(name, sku))
           `)
           .eq('tenant_id', tenant.id)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false }),
+      ]);
 
-        const mapped = (oldRcpts || []).map((r) => ({
-          ...r,
-          control_number: r.reference_number || `STK-IN-${r.id.slice(0, 8)}`,
-          stock_in_items: r.purchase_receipt_items?.map((item: any) => ({
-            ...item,
-            quantity_cases: item.quantity,
-            subtotal: item.total_cost || item.quantity * (item.unit_cost || 0),
-          })),
-        }));
+      if (supsRes.error) console.error('Error fetching suppliers:', supsRes.error);
+      if (whsRes.error) console.error('Error fetching warehouses:', whsRes.error);
+      if (prodsRes.error) console.error('Error fetching products:', prodsRes.error);
+      if (stInRes.error) console.error('Error fetching stock in receipts:', stInRes.error);
 
-        setStockInReceipts(mapped);
-      }
+      setSuppliers(supsRes.data || []);
+      setWarehouses(whsRes.data || []);
+      setProducts(prodsRes.data || []);
+      setStockInReceipts(stInRes.data || []);
     } catch (err) {
       console.error('Error fetching stock in data:', err);
     } finally {

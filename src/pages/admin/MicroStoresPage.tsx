@@ -30,31 +30,40 @@ export const MicroStoresPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const fetchStoresData = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const { data: storeData, error: sErr } = await supabase
-        .from('micro_stores')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .order('store_name');
+      const [storesRes, salesRes] = await Promise.all([
+        supabase
+          .from('micro_stores')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .order('store_name'),
+        supabase
+          .from('sales')
+          .select(`
+            id,
+            micro_store_id,
+            sale_number,
+            subtotal,
+            total,
+            created_at,
+            sale_items(quantity, unit_price, subtotal),
+            agents(full_name, employee_code),
+            trucks(truck_code, plate_number)
+          `)
+          .eq('tenant_id', tenant.id)
+          .order('created_at', { ascending: false }),
+      ]);
 
-      if (sErr) throw sErr;
-      setStores(storeData || []);
+      if (storesRes.error) console.error('Error fetching stores:', storesRes.error);
+      if (salesRes.error) console.error('Error fetching store sales:', salesRes.error);
 
-      // Fetch all sales & sale items for customer lifetime metrics
-      const { data: salesData } = await supabase
-        .from('sales')
-        .select(`
-          *,
-          sale_items(*, products(name, sku)),
-          agents(full_name, employee_code),
-          trucks(truck_code, plate_number)
-        `)
-        .eq('tenant_id', tenant.id)
-        .order('created_at', { ascending: false });
-
-      setSales(salesData || []);
+      setStores(storesRes.data || []);
+      setSales(salesRes.data || []);
     } catch (err) {
       console.error('Error fetching stores data:', err);
     } finally {

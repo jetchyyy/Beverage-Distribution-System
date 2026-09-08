@@ -34,11 +34,16 @@ export const AgentsTrucksPage: React.FC = () => {
   const fetchData = async () => {
     if (!tenant) return;
     try {
-      const { data: trks } = await supabase.from('trucks').select('*').eq('tenant_id', tenant.id).order('truck_code');
-      setTrucks(trks || []);
+      const [trksRes, agsRes] = await Promise.all([
+        supabase.from('trucks').select('*').eq('tenant_id', tenant.id).order('truck_code'),
+        supabase.from('agents').select('*').eq('tenant_id', tenant.id).order('full_name'),
+      ]);
 
-      const { data: ags } = await supabase.from('agents').select('*').eq('tenant_id', tenant.id).order('full_name');
-      setAgents(ags || []);
+      if (trksRes.error) console.error('Error fetching trucks:', trksRes.error);
+      if (agsRes.error) console.error('Error fetching agents:', agsRes.error);
+
+      setTrucks(trksRes.data || []);
+      setAgents(agsRes.data || []);
     } catch (err) {
       console.error('Error fetching fleet data:', err);
     }

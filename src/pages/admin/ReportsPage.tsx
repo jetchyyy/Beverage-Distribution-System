@@ -11,25 +11,55 @@ export const ReportsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   const fetchReportData = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       if (activeTab === 'movements') {
-        const { data } = await supabase
-          .from('inventory_movements')
+        const { data: trfs, error: trfErr } = await supabase
+          .from('stock_transfers')
           .select(`
-            *,
-            products(name, sku),
-            returnable_items(name, type),
-            from_location:from_location_id(name),
-            to_location:to_location_id(name)
+            id,
+            transfer_number,
+            transfer_type,
+            created_at,
+            from_location:locations!from_location_id(name),
+            to_location:locations!to_location_id(name),
+            stock_transfer_items(
+              id,
+              quantity,
+              unit,
+              item_type,
+              products(name, sku),
+              returnable_items(name, type)
+            )
           `)
           .eq('tenant_id', tenant.id)
           .order('created_at', { ascending: false })
-          .limit(100);
-        setMovements(data || []);
+          .limit(50);
+
+        if (trfErr) console.error('Error fetching movement transfers:', trfErr);
+
+        const flattened = (trfs || []).flatMap((t: any) =>
+          (t.stock_transfer_items || []).map((item: any) => ({
+            id: item.id,
+            transaction_type: t.transfer_type || 'TRANSFER',
+            item_type: item.item_type || (item.products ? 'PRODUCT' : 'RETURNABLE'),
+            products: item.products,
+            returnable_items: item.returnable_items,
+            from_location: t.from_location,
+            to_location: t.to_location,
+            quantity: item.quantity,
+            unit: item.unit || 'case',
+            created_at: t.created_at,
+          }))
+        );
+
+        setMovements(flattened);
       } else if (activeTab === 'pundo') {
-        const { data } = await supabase
+        const { data, error: pundoErr } = await supabase
           .from('pundo_ledger')
           .select(`
             *,
@@ -37,7 +67,11 @@ export const ReportsPage: React.FC = () => {
             returnable_items(name, type)
           `)
           .eq('tenant_id', tenant.id)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(200);
+
+        if (pundoErr) console.error('Error fetching pundo audit:', pundoErr);
+
         setPundoRows(data || []);
       }
     } catch (err) {

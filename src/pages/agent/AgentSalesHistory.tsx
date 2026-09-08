@@ -35,7 +35,10 @@ export const AgentSalesHistory: React.FC = () => {
   const [todayCasesCount, setTodayCasesCount] = useState(0);
 
   const fetchAgentSalesHistory = async () => {
-    if (!tenant || !profile?.id) return;
+    if (!tenant || !profile?.id) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
 
     try {

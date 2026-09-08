@@ -37,69 +37,60 @@ export const AdminDashboard: React.FC = () => {
 
     setLoading(true);
     try {
-      const { count: pCount } = await supabase
-        .from('products')
-        .select('*', { count: 'exact', head: true })
-        .eq('tenant_id', tenant.id);
-      setProductCount(pCount || 0);
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
 
-      const { count: agCount } = await supabase
-        .from('agents')
-        .select('*', { count: 'exact', head: true })
-        .eq('tenant_id', tenant.id)
-        .eq('status', 'ACTIVE');
-      setActiveAgents(agCount || 0);
+      const [
+        pCountRes,
+        agCountRes,
+        trCountRes,
+        stCountRes,
+        balancesRes,
+        salesTodayRes,
+        pundoRes,
+        recentRes,
+      ] = await Promise.all([
+        supabase.from('products').select('*', { count: 'exact', head: true }).eq('tenant_id', tenant.id),
+        supabase.from('agents').select('*', { count: 'exact', head: true }).eq('tenant_id', tenant.id).eq('status', 'ACTIVE'),
+        supabase.from('trucks').select('*', { count: 'exact', head: true }).eq('tenant_id', tenant.id).eq('status', 'ACTIVE'),
+        supabase.from('micro_stores').select('*', { count: 'exact', head: true }).eq('tenant_id', tenant.id).eq('status', 'ACTIVE'),
+        supabase.from('inventory_balances').select('quantity, locations(type)').eq('tenant_id', tenant.id),
+        supabase.from('sales').select('total').eq('tenant_id', tenant.id).gte('created_at', todayStart.toISOString()),
+        supabase
+          .from('pundo_ledger')
+          .select('balance_value, micro_store_id, returnable_item_id, created_at')
+          .eq('tenant_id', tenant.id)
+          .order('created_at', { ascending: false })
+          .limit(500),
+        supabase
+          .from('sales')
+          .select('id, sale_number, total, created_at, micro_stores(store_name), agents(full_name)')
+          .eq('tenant_id', tenant.id)
+          .order('created_at', { ascending: false })
+          .limit(5),
+      ]);
 
-      const { count: trCount } = await supabase
-        .from('trucks')
-        .select('*', { count: 'exact', head: true })
-        .eq('tenant_id', tenant.id)
-        .eq('status', 'ACTIVE');
-      setActiveTrucks(trCount || 0);
-
-      const { count: stCount } = await supabase
-        .from('micro_stores')
-        .select('*', { count: 'exact', head: true })
-        .eq('tenant_id', tenant.id)
-        .eq('status', 'ACTIVE');
-      setActiveStores(stCount || 0);
-
-      const { data: balances } = await supabase
-        .from('inventory_balances')
-        .select('quantity, locations(type)')
-        .eq('tenant_id', tenant.id);
+      setProductCount(pCountRes.count || 0);
+      setActiveAgents(agCountRes.count || 0);
+      setActiveTrucks(trCountRes.count || 0);
+      setActiveStores(stCountRes.count || 0);
 
       let whSum = 0;
       let trkSum = 0;
-      balances?.forEach((b: any) => {
+      balancesRes.data?.forEach((b: any) => {
         if (b.locations?.type === 'WAREHOUSE') whSum += Number(b.quantity || 0);
         if (b.locations?.type === 'TRUCK') trkSum += Number(b.quantity || 0);
       });
       setWarehouseStock(whSum);
       setTruckStock(trkSum);
 
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-
-      const { data: salesToday } = await supabase
-        .from('sales')
-        .select('total')
-        .eq('tenant_id', tenant.id)
-        .gte('created_at', todayStart.toISOString());
-
       let sumSales = 0;
-      salesToday?.forEach((s) => (sumSales += Number(s.total || 0)));
+      salesTodayRes.data?.forEach((s) => (sumSales += Number(s.total || 0)));
       setTodaySalesTotal(sumSales);
-      setTodaySalesCount(salesToday?.length || 0);
-
-      const { data: pundoEntries } = await supabase
-        .from('pundo_ledger')
-        .select('balance_value, micro_store_id, returnable_item_id, created_at')
-        .eq('tenant_id', tenant.id)
-        .order('created_at', { ascending: false });
+      setTodaySalesCount(salesTodayRes.data?.length || 0);
 
       const latestMap = new Map<string, number>();
-      pundoEntries?.forEach((entry: any) => {
+      pundoRes.data?.forEach((entry: any) => {
         const key = `${entry.micro_store_id}_${entry.returnable_item_id}`;
         if (!latestMap.has(key)) {
           latestMap.set(key, Number(entry.balance_value || 0));
@@ -109,13 +100,7 @@ export const AdminDashboard: React.FC = () => {
       latestMap.forEach((val) => (pundoSum += val));
       setTotalPundoValue(pundoSum);
 
-      const { data: recent } = await supabase
-        .from('sales')
-        .select('id, sale_number, total, created_at, micro_stores(store_name), agents(full_name)')
-        .eq('tenant_id', tenant.id)
-        .order('created_at', { ascending: false })
-        .limit(5);
-      setRecentSales(recent || []);
+      setRecentSales(recentRes.data || []);
     } catch (err) {
       console.error('Error loading dashboard data:', err);
     } finally {

@@ -51,41 +51,47 @@ export const PromotionsPage: React.FC = () => {
   const [statementSupplierId, setStatementSupplierId] = useState<string>('');
 
   const fetchPromotionsData = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const { data: prods } = await supabase.from('products').select('*').eq('tenant_id', tenant.id).order('name');
-      setProducts(prods || []);
+      const [prodsRes, supsRes, promoRes, claimRes] = await Promise.all([
+        supabase.from('products').select('*').eq('tenant_id', tenant.id).order('name'),
+        supabase.from('suppliers').select('*').eq('tenant_id', tenant.id).order('name'),
+        supabase
+          .from('promotions')
+          .select(`
+            *,
+            suppliers(name, supplier_code),
+            products!buy_product_id(name, sku)
+          `)
+          .eq('tenant_id', tenant.id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('supplier_promo_claims')
+          .select(`
+            *,
+            promotions(promo_name, promo_code),
+            suppliers(name, supplier_code),
+            micro_stores(store_name, store_code),
+            agents(full_name),
+            trucks(truck_code)
+          `)
+          .eq('tenant_id', tenant.id)
+          .order('created_at', { ascending: false }),
+      ]);
 
-      const { data: sups } = await supabase.from('suppliers').select('*').eq('tenant_id', tenant.id).order('name');
-      setSuppliers(sups || []);
+      if (prodsRes.error) console.error('Error fetching products:', prodsRes.error);
+      if (supsRes.error) console.error('Error fetching suppliers:', supsRes.error);
+      if (promoRes.error) console.error('Error fetching promotions:', promoRes.error);
+      if (claimRes.error) console.error('Error fetching claims:', claimRes.error);
 
-      const { data: promoData } = await supabase
-        .from('promotions')
-        .select(`
-          *,
-          suppliers(name, supplier_code),
-          products!buy_product_id(name, sku)
-        `)
-        .eq('tenant_id', tenant.id)
-        .order('created_at', { ascending: false });
-
-      setPromotions(promoData || []);
-
-      const { data: claimData } = await supabase
-        .from('supplier_promo_claims')
-        .select(`
-          *,
-          promotions(promo_name, promo_code),
-          suppliers(name, supplier_code),
-          micro_stores(store_name, store_code),
-          agents(full_name),
-          trucks(truck_code)
-        `)
-        .eq('tenant_id', tenant.id)
-        .order('created_at', { ascending: false });
-
-      setClaims(claimData || []);
+      setProducts(prodsRes.data || []);
+      setSuppliers(supsRes.data || []);
+      setPromotions(promoRes.data || []);
+      setClaims(claimRes.data || []);
     } catch (err) {
       console.error('Error fetching promotions data:', err);
     } finally {

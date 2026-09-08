@@ -49,49 +49,63 @@ export const StockTransfersPage: React.FC = () => {
   const [transferQty, setTransferQty] = useState<number>(10);
 
   const fetchTransfersData = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      // 1. Fetch Main Warehouse Location
-      const { data: whLoc } = await supabase
-        .from('locations')
-        .select('id')
-        .eq('tenant_id', tenant.id)
-        .eq('type', 'WAREHOUSE')
-        .limit(1)
-        .maybeSingle();
-      setWarehouseLocationId(whLoc?.id || null);
+      const [whRes, prodsRes, retsRes, trksRes, trfsRes, salesRes, retBalsRes] = await Promise.all([
+        supabase
+          .from('locations')
+          .select('id')
+          .eq('tenant_id', tenant.id)
+          .eq('type', 'WAREHOUSE')
+          .limit(1)
+          .maybeSingle(),
+        supabase.from('products').select('*').eq('tenant_id', tenant.id),
+        supabase.from('returnable_items').select('*').eq('tenant_id', tenant.id),
+        supabase.from('trucks').select('*').eq('tenant_id', tenant.id),
+        supabase
+          .from('stock_transfers')
+          .select(`
+            *,
+            from_location:locations!from_location_id(id, name, type),
+            to_location:locations!to_location_id(id, name, type)
+          `)
+          .eq('tenant_id', tenant.id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('sales')
+          .select('id, truck_id, total, created_at, sale_items(quantity)')
+          .eq('tenant_id', tenant.id),
+        supabase
+          .from('returnable_balances')
+          .select('*, returnable_items(name, item_type, type)')
+          .eq('tenant_id', tenant.id),
+      ]);
 
-      // 2. Fetch Catalog (Products, Returnables & Trucks)
-      const { data: prods } = await supabase.from('products').select('*').eq('tenant_id', tenant.id);
-      setProducts(prods || []);
+      const prods = prodsRes.data || [];
+      const rets = retsRes.data || [];
+      const trks = trksRes.data || [];
+      const trfs = trfsRes.data || [];
+      const allSales = salesRes.data || [];
+      const allReturnableBals = retBalsRes.data || [];
 
-      const { data: rets } = await supabase.from('returnable_items').select('*').eq('tenant_id', tenant.id);
+      setWarehouseLocationId(whRes.data?.id || null);
+      setProducts(prods);
+      setTrucks(trks);
 
-      const { data: trks } = await supabase.from('trucks').select('*').eq('tenant_id', tenant.id);
-      setTrucks(trks || []);
-
-      // 3. Fetch Stock Transfer History
-      const { data: trfs, error: trfErr } = await supabase
-        .from('stock_transfers')
-        .select(`
-          *,
-          from_location:locations!from_location_id(id, name, type),
-          to_location:locations!to_location_id(id, name, type)
-        `)
-        .eq('tenant_id', tenant.id)
-        .order('created_at', { ascending: false });
-
-      if (trfErr) throw trfErr;
-
-      // 4. Fetch Transfer Items, Sales & Sale Items for Route Audit
-      const { data: allTransferItems } = await supabase.from('stock_transfer_items').select('*');
-      const { data: allSales } = await supabase.from('sales').select('*').eq('tenant_id', tenant.id);
-      const { data: allSaleItems } = await supabase.from('sale_items').select('*');
-      const { data: allReturnableBals } = await supabase
-        .from('returnable_balances')
-        .select('*, returnable_items(name, item_type, type)')
-        .eq('tenant_id', tenant.id);
+      // Fetch only items belonging to this tenant's transfers
+      const trfIds = trfs.map((t) => t.id);
+      let allTransferItems: any[] = [];
+      if (trfIds.length > 0) {
+        const { data: tiData } = await supabase
+          .from('stock_transfer_items')
+          .select('*')
+          .in('stock_transfer_id', trfIds);
+        allTransferItems = tiData || [];
+      }
 
       const enriched = (trfs || []).map((t) => {
         const items = (allTransferItems || [])
@@ -117,8 +131,6 @@ export const StockTransfersPage: React.FC = () => {
 
         let cashRemittanceMoney = 0;
         truckSales.forEach((s) => (cashRemittanceMoney += Number(s.total || 0)));
-
-        const saleIds = new Set(truckSales.map((s) => s.id));
 
         // Calculate initial dispatched cases to truck today
         const outboundTrfsToday = (trfs || []).filter(
@@ -161,10 +173,10 @@ export const StockTransfersPage: React.FC = () => {
 
         // Calculate cases sold today with robust fallback:
         let casesSoldToday = 0;
-        (allSaleItems || []).forEach((si) => {
-          if (saleIds.has(si.sale_id)) {
+        truckSales.forEach((s) => {
+          (s.sale_items || []).forEach((si: any) => {
             casesSoldToday += Number(si.quantity || 0);
-          }
+          });
         });
 
         if (casesSoldToday === 0 && initialDispatchedCases > 0) {

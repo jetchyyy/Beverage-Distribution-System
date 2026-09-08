@@ -27,34 +27,38 @@ export const ReturnablesPundoPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const { data: rets, error: retErr } = await supabase
-        .from('returnable_items')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .order('name');
+      const [retsRes, stRes, ledgRes] = await Promise.all([
+        supabase
+          .from('returnable_items')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .order('name'),
+        supabase
+          .from('micro_stores')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .order('store_name'),
+        supabase
+          .from('pundo_ledger')
+          .select('*, micro_stores(store_name), returnable_items(name, item_type)')
+          .eq('tenant_id', tenant.id)
+          .order('created_at', { ascending: false })
+          .limit(500),
+      ]);
 
-      if (retErr) throw retErr;
-      setReturnables(rets || []);
+      if (retsRes.error) console.error('Error fetching returnables:', retsRes.error);
+      if (stRes.error) console.error('Error fetching stores:', stRes.error);
+      if (ledgRes.error) console.error('Error fetching pundo ledger:', ledgRes.error);
 
-      const { data: st, error: stErr } = await supabase
-        .from('micro_stores')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .order('store_name');
-
-      if (stErr) throw stErr;
-      setStores(st || []);
-
-      const { data: ledg } = await supabase
-        .from('pundo_ledger')
-        .select('*, micro_stores(store_name), returnable_items(name, item_type)')
-        .eq('tenant_id', tenant.id)
-        .order('created_at', { ascending: false });
-
-      setPundoLedger(ledg || []);
+      setReturnables(retsRes.data || []);
+      setStores(stRes.data || []);
+      setPundoLedger(ledgRes.data || []);
     } catch (err) {
       console.error('Error fetching PUNDO data:', err);
     } finally {
