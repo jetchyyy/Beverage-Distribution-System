@@ -331,7 +331,7 @@ export const AgentDeliveryFlow: React.FC = () => {
             // Check if matching bottle already exists in catalog
             let existingBottle = workingCatalog.find(
               (r) => (r.item_type === 'BOTTLE' || r.type === 'BOTTLE') &&
-                     (r.product_id === prod.id || (prodBrand && getBrandKey(r.name) === prodBrand) || r.name.toLowerCase().includes(prodName.toLowerCase()))
+                (r.product_id === prod.id || (prodBrand && getBrandKey(r.name) === prodBrand) || r.name.toLowerCase().includes(prodName.toLowerCase()))
             );
 
             if (!existingBottle) {
@@ -368,7 +368,7 @@ export const AgentDeliveryFlow: React.FC = () => {
             // Check if matching case already exists in catalog
             let existingCase = workingCatalog.find(
               (r) => (r.item_type === 'CASE' || r.type === 'CASE') &&
-                     (r.product_id === prod.id || (prodBrand && getBrandKey(r.name) === prodBrand) || r.name.toLowerCase().includes(prodName.toLowerCase()))
+                (r.product_id === prod.id || (prodBrand && getBrandKey(r.name) === prodBrand) || r.name.toLowerCase().includes(prodName.toLowerCase()))
             );
 
             if (!existingCase) {
@@ -475,16 +475,26 @@ export const AgentDeliveryFlow: React.FC = () => {
   let totalDeliveredBottles = 0;
   let totalRequiredBottles = 0;
   let totalRequiredCases = 0;
+  let totalFreePromoCases = 0;
   let cartTotal = 0;
 
   // Map of returnable_item_id -> { item, requiredQty, sourceProducts }
   const requiredByReturnableId = new Map<string, { item: ReturnableItem; requiredQty: number; sourceProducts: string[] }>();
 
-  cart.forEach((val) => {
+  cart.forEach((val, prodId) => {
     const { product, qtyCases, casePrice, unitsPerCase } = val;
     totalDeliveredCases += qtyCases;
     totalDeliveredBottles += qtyCases * unitsPerCase;
     cartTotal += qtyCases * casePrice;
+
+    // Calculate free promo cases
+    const activePromo = promotionsCatalog.find((p) => p.buy_product_id === prodId && p.is_active);
+    if (activePromo) {
+      const buyQty = Number(activePromo.buy_quantity || 5);
+      const freeQtyPerDeal = Number(activePromo.free_quantity || 1);
+      const promoDeals = Math.floor(qtyCases / buyQty);
+      totalFreePromoCases += promoDeals * freeQtyPerDeal;
+    }
 
     const { bottleItem, caseItem, isReturnable } = resolveProductContainers(product, returnableCatalog);
     if (isReturnable) {
@@ -509,6 +519,8 @@ export const AgentDeliveryFlow: React.FC = () => {
       }
     }
   });
+
+  const totalPhysicalOffloadCases = totalDeliveredCases + totalFreePromoCases;
 
   // Prepare Step 3: Populate ONLY returnables strictly associated with the delivered products in cart
   const prepareReturnablesStep = () => {
@@ -1120,9 +1132,8 @@ export const AgentDeliveryFlow: React.FC = () => {
           {[1, 2, 3, 4].map((i) => (
             <div
               key={i}
-              className={`h-2 rounded-full transition-all ${
-                i === step ? 'w-6 bg-zinc-900' : i < step ? 'w-4 bg-zinc-700' : 'w-4 bg-zinc-200'
-              }`}
+              className={`h-2 rounded-full transition-all ${i === step ? 'w-6 bg-zinc-900' : i < step ? 'w-4 bg-zinc-700' : 'w-4 bg-zinc-200'
+                }`}
             />
           ))}
         </div>
@@ -1206,9 +1217,8 @@ export const AgentDeliveryFlow: React.FC = () => {
                       setSelectedStore(s);
                       setStep(2);
                     }}
-                    className={`cursor-pointer transition hover:border-zinc-400 border-zinc-200 shadow-xs ${
-                      selectedStore?.id === s.id ? 'border-zinc-900 ring-1 ring-zinc-900' : ''
-                    }`}
+                    className={`cursor-pointer transition hover:border-zinc-400 border-zinc-200 shadow-xs ${selectedStore?.id === s.id ? 'border-zinc-900 ring-1 ring-zinc-900' : ''
+                      }`}
                   >
                     <CardContent className="p-3.5 flex items-center justify-between gap-3">
                       <div className="space-y-1">
@@ -1342,6 +1352,19 @@ export const AgentDeliveryFlow: React.FC = () => {
             </Button>
           </div>
 
+          {/* Active Promo Guidance Banner */}
+          {promotionsCatalog.some((p) => p.is_active) && (
+            <div className="bg-blue-50/90 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 space-y-1 shadow-xs">
+              <div className="flex items-center gap-1.5 font-bold text-blue-950">
+
+                <span>Trade Promotion Notice for Agents:</span>
+              </div>
+              <p className="text-blue-800 leading-relaxed text-[11px]">
+                Enter <strong>only the paid cases</strong> the store is purchasing (e.g. enter <strong>5</strong>). The system will <strong>automatically grant the +1 FREE case</strong>, bill the store for 5 cases, and deduct all 6 physical cases from your truck load.
+              </p>
+            </div>
+          )}
+
           <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Products to Deliver</h2>
 
           {truckBalances.length === 0 ? (
@@ -1376,7 +1399,7 @@ export const AgentDeliveryFlow: React.FC = () => {
                             Available: <strong className="text-zinc-900 font-mono">{maxStock} cases</strong> ({units} btls/case)
                           </p>
 
-                          {/* Active Promo Badge */}
+                          {/* Active Promo Badge & Helper */}
                           {(() => {
                             const activePromo = promotionsCatalog.find((p) => p.buy_product_id === prod.id && p.is_active);
                             if (!activePromo) return null;
@@ -1387,15 +1410,25 @@ export const AgentDeliveryFlow: React.FC = () => {
                             const freeCs = deals * freeQtyPerDeal;
 
                             return (
-                              <div className="mt-1 space-y-1">
-                                <Badge variant="secondary" className="text-[10px]">
-                                  Promo: Buy {buyQty} &rarr; +{freeQtyPerDeal} FREE
+                              <div className="mt-2 space-y-1.5">
+                                <Badge variant="secondary" className="text-[10px] bg-blue-100 text-blue-900 font-semibold border-blue-200">
+                                  Deal: Buy {buyQty} &rarr; +{freeQtyPerDeal} FREE
                                 </Badge>
 
-                                {freeCs > 0 && (
-                                  <div className="text-[11px] font-mono font-bold text-zinc-900">
-                                    +{freeCs} Free Promo Cases applied
+                                {freeCs > 0 ? (
+                                  <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-md text-[11px] text-emerald-900 space-y-0.5">
+                                    <div className="font-bold flex items-center gap-1 text-emerald-800">
+                                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>+{freeCs} Free Promo Case{freeCs > 1 ? 's' : ''} auto-granted!</span>
+                                    </div>
+                                    <p className="text-[10px] text-emerald-700">
+                                      Store pays for {currentQty} cs • Offload from truck: <strong>{currentQty + freeCs} physical cases</strong> ({currentQty} paid + {freeCs} free @ ₱0.00)
+                                    </p>
                                   </div>
+                                ) : (
+                                  <p className="text-[10px] text-zinc-500">
+                                    💡 Enter {buyQty} cases to auto-unlock +{freeQtyPerDeal} free promo case!
+                                  </p>
                                 )}
                               </div>
                             );
@@ -1444,8 +1477,18 @@ export const AgentDeliveryFlow: React.FC = () => {
 
           <div className="bg-zinc-50 border border-zinc-200 p-4 rounded-lg space-y-2 text-xs">
             <div className="flex justify-between text-zinc-600">
-              <span>Delivered: <strong className="text-zinc-900">{totalDeliveredCases} cases</strong></span>
+              <span>Paid Products: <strong className="text-zinc-900">{totalDeliveredCases} cases</strong></span>
               <span>Total Units: <strong className="text-zinc-900">{totalDeliveredBottles} bottles</strong></span>
+            </div>
+            {totalFreePromoCases > 0 && (
+              <div className="flex justify-between text-emerald-700 font-semibold pt-1 border-t border-zinc-200/60 text-xs">
+                <span>+ Free Promo Cases (₱0.00):</span>
+                <span>+{totalFreePromoCases} cases</span>
+              </div>
+            )}
+            <div className="flex justify-between text-zinc-700 font-medium text-xs">
+              <span>Total Physical Cases to Offload:</span>
+              <strong className="text-zinc-900 font-mono">{totalPhysicalOffloadCases} cases</strong>
             </div>
             <div className="flex justify-between text-sm font-bold text-zinc-900 pt-2 border-t border-zinc-200">
               <span>Product Subtotal:</span>
@@ -1719,10 +1762,20 @@ export const AgentDeliveryFlow: React.FC = () => {
             <CardContent className="space-y-4 pt-0">
               <div className="space-y-1.5 text-xs text-zinc-600">
                 <div className="flex justify-between">
-                  <span>Products Delivered:</span>
+                  <span>Paid Cases:</span>
                   <span className="font-semibold text-zinc-900">{totalDeliveredCases} cases ({totalDeliveredBottles} bottles)</span>
                 </div>
-                <div className="flex justify-between">
+                {totalFreePromoCases > 0 && (
+                  <div className="flex justify-between text-emerald-700 font-semibold">
+                    <span>+ Free Promo Cases (₱0.00):</span>
+                    <span>+{totalFreePromoCases} cases auto-granted</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-medium text-zinc-800">
+                  <span>Total Physical Cases to Offload:</span>
+                  <span className="font-semibold text-zinc-900">{totalPhysicalOffloadCases} cases</span>
+                </div>
+                <div className="flex justify-between pt-1 border-t border-zinc-100">
                   <span>Beverage Subtotal:</span>
                   <span className="font-mono font-semibold text-zinc-900">₱{cartTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>

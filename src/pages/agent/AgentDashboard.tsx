@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
-import { Truck, ShoppingBag, ArrowRight, Package } from 'lucide-react';
+import { Truck, ShoppingBag, ArrowRight, Package, Sparkles } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
@@ -20,6 +20,7 @@ export const AgentDashboard: React.FC = () => {
   const [todayBottlesCollected, setTodayBottlesCollected] = useState(0);
   const [todayCasesCollected, setTodayCasesCollected] = useState(0);
   const [truckInventoryItems, setTruckInventoryItems] = useState<any[]>([]);
+  const [activePromos, setActivePromos] = useState<any[]>([]);
 
   const fetchAgentDashboard = async () => {
     if (!tenant) return;
@@ -109,7 +110,7 @@ export const AgentDashboard: React.FC = () => {
           salesQuery = salesQuery.eq('truck_id', targetTruck.id);
         }
 
-        const [balsRes, rBalsRes, salesTodayRes] = await Promise.all([
+        const [balsRes, rBalsRes, salesTodayRes, promosRes] = await Promise.all([
           supabase
             .from('inventory_balances')
             .select('*, products(name, sku)')
@@ -119,7 +120,14 @@ export const AgentDashboard: React.FC = () => {
             .select('*, returnable_items(name, item_type, type)')
             .eq('location_id', locId),
           salesQuery,
+          supabase
+            .from('promotions')
+            .select('*')
+            .eq('tenant_id', tenant.id)
+            .eq('is_active', true),
         ]);
+
+        setActivePromos(promosRes.data || []);
 
         const bals = balsRes.data || [];
         const activeProds = bals.filter((b) => Number(b.quantity || 0) > 0);
@@ -199,6 +207,33 @@ export const AgentDashboard: React.FC = () => {
           </Button>
         </CardContent>
       </Card>
+
+      {/* Active Trade Promos Reminder for Agent */}
+      {activePromos.length > 0 && (
+        <Card className="border-blue-200 bg-blue-50/50 shadow-xs">
+          <CardHeader className="p-4 pb-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+              <div>
+                <CardTitle className="text-sm font-bold text-blue-950">Active Trade Promos Today</CardTitle>
+                <CardDescription className="text-[11px] text-blue-800 font-medium">
+                  Auto-Promo is active: Enter <strong>paid cases only</strong> during sales. Free promo cases are auto-added at ₱0.00.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-4 pt-1 space-y-1.5">
+            {activePromos.map((p) => (
+              <div key={p.id} className="flex items-center justify-between text-xs bg-white p-2 rounded-md border border-blue-100">
+                <span className="font-semibold text-zinc-900">{p.promo_name || 'Trade Promo Deal'}</span>
+                <Badge variant="secondary" className="text-[10px] bg-blue-100 text-blue-900 border-blue-200 font-bold font-mono">
+                  Buy {p.buy_quantity} &rarr; +{p.free_quantity} FREE
+                </Badge>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Summary KPI Cards */}
       <div className="space-y-3">
