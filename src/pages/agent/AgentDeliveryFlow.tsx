@@ -866,19 +866,25 @@ export const AgentDeliveryFlow: React.FC = () => {
           const newBal = prevBal + row.shortage;
           const newVal = newBal * row.rate;
 
-          const { error: delivErr } = await supabase.from('pundo_ledger').insert([
-            {
-              tenant_id: tenant.id,
-              micro_store_id: selectedStore.id,
-              returnable_item_id: realReturnableId,
-              transaction_type: 'DELIVERED_CONTAINER',
-              quantity_change: row.shortage,
-              pundo_rate: row.rate,
-              balance_quantity: newBal,
-              balance_value: newVal,
-              reference_id: sale.id,
-            },
-          ]);
+          const delivPayload: any = {
+            tenant_id: tenant.id,
+            micro_store_id: selectedStore.id,
+            returnable_item_id: realReturnableId,
+            transaction_type: 'DELIVERED_CONTAINER',
+            quantity_change: row.shortage,
+            pundo_rate: row.rate,
+            balance_quantity: newBal,
+            balance_value: newVal,
+            reference_id: sale.id,
+          };
+
+          let { error: delivErr } = await supabase.from('pundo_ledger').insert([delivPayload]);
+          if (delivErr && delivErr.message?.includes('pundo_rate')) {
+            const { pundo_rate, ...fallbackPayload } = delivPayload;
+            const res = await supabase.from('pundo_ledger').insert([fallbackPayload]);
+            delivErr = res.error;
+          }
+
           if (delivErr) console.error('❌ Error inserting DELIVERED_CONTAINER into pundo_ledger:', delivErr);
           else console.log(`✅ [pundo_ledger] Logged DELIVERED_CONTAINER for ${row.item.name}: +${row.shortage}`);
         }
@@ -899,19 +905,25 @@ export const AgentDeliveryFlow: React.FC = () => {
           const newBal = Math.max(0, prevBal - row.returnedQty);
           const newVal = newBal * row.rate;
 
-          const { error: pundoErr } = await supabase.from('pundo_ledger').insert([
-            {
-              tenant_id: tenant.id,
-              micro_store_id: selectedStore.id,
-              returnable_item_id: realReturnableId,
-              transaction_type: 'RETURNED_EMPTY',
-              quantity_change: -row.returnedQty,
-              pundo_rate: row.rate,
-              balance_quantity: newBal,
-              balance_value: newVal,
-              reference_id: sale.id,
-            },
-          ]);
+          const retPayload: any = {
+            tenant_id: tenant.id,
+            micro_store_id: selectedStore.id,
+            returnable_item_id: realReturnableId,
+            transaction_type: 'RETURNED_EMPTY',
+            quantity_change: -row.returnedQty,
+            pundo_rate: row.rate,
+            balance_quantity: newBal,
+            balance_value: newVal,
+            reference_id: sale.id,
+          };
+
+          let { error: pundoErr } = await supabase.from('pundo_ledger').insert([retPayload]);
+          if (pundoErr && pundoErr.message?.includes('pundo_rate')) {
+            const { pundo_rate, ...fallbackPayload } = retPayload;
+            const res = await supabase.from('pundo_ledger').insert([fallbackPayload]);
+            pundoErr = res.error;
+          }
+
           if (pundoErr) console.error('❌ Error inserting RETURNED_EMPTY into pundo_ledger:', pundoErr);
           else console.log(`✅ [pundo_ledger] Logged RETURNED_EMPTY for ${row.item.name}: -${row.returnedQty}`);
 

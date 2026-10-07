@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import { useModal } from '../../context/ModalContext';
-import { CheckSquare, Package, RotateCcw, Clock, ShieldCheck, PackageX, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { CheckSquare, Package, RotateCcw, Clock, ShieldCheck, PackageX, RefreshCw, CheckCircle2, ShoppingBag, PlusCircle } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
@@ -38,6 +39,7 @@ export const AgentReconciliation: React.FC = () => {
   const { tenant } = useTenant();
   const { profile } = useAuth();
   const { showError, confirm } = useModal();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [pendingTransfer, setPendingTransfer] = useState<any | null>(null);
@@ -114,46 +116,29 @@ export const AgentReconciliation: React.FC = () => {
       if (trk && trk.location_id) {
         setTruck(trk);
 
-        // Fetch the absolute most recent EOD offload transfer for this truck
-        const { data: latestEodTransfer } = await supabase
-          .from('stock_transfers')
-          .select('*, stock_transfer_items(*, products(name, sku), returnable_items(name, item_type, unit))')
-          .eq('tenant_id', tenant.id)
-          .eq('from_location_id', trk.location_id)
-          .eq('transfer_type', 'TRUCK_OFFLOAD_EOD')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (latestEodTransfer) {
-          if (['PENDING', 'PENDING_APPROVAL', 'IN_TRANSIT', 'REQUESTED'].includes(latestEodTransfer.status)) {
-            setPendingTransfer(latestEodTransfer);
-            setCompletedTransfer(null);
-          } else if (latestEodTransfer.status === 'COMPLETED') {
-            setPendingTransfer(null);
-            setCompletedTransfer(latestEodTransfer);
-          } else {
-            setPendingTransfer(null);
-            setCompletedTransfer(null);
-          }
-        } else {
-          setPendingTransfer(null);
-          setCompletedTransfer(null);
-        }
-
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
-        const [todaySalesRes, trfTodayRes, prodBalsRes, catRetsRes, retBalsRes] = await Promise.all([
+        // Fetch the absolute most recent EOD offload transfer for this truck
+        const [latestEodRes, todaySalesRes, trfTodayRes, prodBalsRes, catRetsRes, retBalsRes] = await Promise.all([
+          supabase
+            .from('stock_transfers')
+            .select('*, stock_transfer_items(*, products(name, sku), returnable_items(name, item_type, unit))')
+            .eq('tenant_id', tenant.id)
+            .eq('from_location_id', trk.location_id)
+            .eq('transfer_type', 'TRUCK_OFFLOAD_EOD')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
           supabase
             .from('sales')
-            .select('id, total, sale_items(*)')
+            .select('id, created_at, total, sale_items(*)')
             .eq('tenant_id', tenant.id)
             .eq('truck_id', trk.id)
             .gte('created_at', todayStart.toISOString()),
           supabase
             .from('stock_transfers')
-            .select('id')
+            .select('id, created_at')
             .eq('tenant_id', tenant.id)
             .eq('to_location_id', trk.location_id)
             .eq('transfer_type', 'WAREHOUSE_TO_TRUCK')
@@ -168,6 +153,32 @@ export const AgentReconciliation: React.FC = () => {
             .select('*, returnable_items(*)')
             .eq('location_id', trk.location_id),
         ]);
+
+        const latestEodTransfer = latestEodRes.data;
+        const prodBals = prodBalsRes.data || [];
+        const retBals = retBalsRes.data || [];
+        const hasActiveStock = prodBals.some((b) => Number(b.quantity || 0) > 0) || retBals.some((b) => Number(b.quantity || 0) > 0);
+
+        if (latestEodTransfer) {
+          if (['PENDING', 'PENDING_APPROVAL', 'IN_TRANSIT', 'REQUESTED'].includes(latestEodTransfer.status)) {
+            setPendingTransfer(latestEodTransfer);
+            setCompletedTransfer(null);
+          } else if (latestEodTransfer.status === 'COMPLETED') {
+            setPendingTransfer(null);
+            // If the truck already has new active stock loaded, don't lock them behind the old completed screen
+            if (hasActiveStock) {
+              setCompletedTransfer(null);
+            } else {
+              setCompletedTransfer(latestEodTransfer);
+            }
+          } else {
+            setPendingTransfer(null);
+            setCompletedTransfer(null);
+          }
+        } else {
+          setPendingTransfer(null);
+          setCompletedTransfer(null);
+        }
 
         let remTotal = 0;
         let totalSoldCasesToday = 0;
@@ -191,7 +202,6 @@ export const AgentReconciliation: React.FC = () => {
           trfItems?.forEach((i) => (transferCasesToday += Number(i.quantity || 0)));
         }
 
-        const prodBals = prodBalsRes.data || [];
         let currentTruckCases = 0;
         prodBals.forEach((b) => (currentTruckCases += Number(b.quantity || 0)));
 
@@ -213,7 +223,6 @@ export const AgentReconciliation: React.FC = () => {
         setProductReconcileItems(prodItems);
 
         const catRets = catRetsRes.data || [];
-        const retBals = retBalsRes.data || [];
         const emptyItemsMap = new Map<string, any>();
 
         // 1. Add any containers currently on the truck with positive balance
@@ -561,18 +570,38 @@ export const AgentReconciliation: React.FC = () => {
               )}
             </div>
 
-            <Button
-              onClick={() => {
-                setCompletedTransfer(null);
-                fetchReconcileData();
-              }}
-              variant="outline"
-              className="w-full gap-2 border-zinc-300"
-              disabled={loading}
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              <span>{loading ? 'Refreshing...' : 'Refresh Route Status'}</span>
-            </Button>
+            <div className="space-y-2 pt-1">
+              <Button
+                onClick={() => navigate('/agent/deliver')}
+                className="w-full gap-2 font-bold h-11"
+              >
+                <ShoppingBag className="w-4 h-4" />
+                <span>Start New Delivery / Sale</span>
+              </Button>
+
+              <Button
+                onClick={() => {
+                  setCompletedTransfer(null);
+                  fetchReconcileData();
+                }}
+                variant="outline"
+                className="w-full gap-2 border-zinc-300 h-10"
+                disabled={loading}
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>Start New Reconciliation / Load</span>
+              </Button>
+
+              <Button
+                onClick={() => fetchReconcileData()}
+                variant="ghost"
+                className="w-full gap-1.5 text-xs text-zinc-500 h-8"
+                disabled={loading}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                <span>{loading ? 'Refreshing...' : 'Refresh Route Status'}</span>
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
