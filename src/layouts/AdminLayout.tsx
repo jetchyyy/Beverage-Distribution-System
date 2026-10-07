@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   Users,
   Tag,
+  TrendingUp,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -45,6 +46,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
 
   const allNavItems = [
     { label: 'Dashboard', path: '/admin', icon: LayoutDashboard, featureKey: 'dashboard' },
+    { label: 'Analytics & Trends', path: '/admin/analytics', icon: TrendingUp, featureKey: 'analytics' },
     { label: 'Products & Packaging', path: '/admin/products', icon: Package, featureKey: 'products' },
     { label: 'Warehouse Inventory', path: '/admin/warehouse', icon: Warehouse, featureKey: 'warehouse' },
     { label: 'Stock Transfers', path: '/admin/transfers', icon: ArrowRightLeft, featureKey: 'transfers' },

@@ -36,6 +36,7 @@ import {
 
 export const FEATURE_CATALOG = [
   { key: 'dashboard', label: 'Dashboard', path: '/admin', description: 'Overview metrics & real-time distributor KPIs' },
+  { key: 'analytics', label: 'Analytics & Trends', path: '/admin/analytics', description: 'Real-time sales velocity, PUNDO circulation, route performance & FIFO aging' },
   { key: 'products', label: 'Products & Packaging', path: '/admin/products', description: 'Beverage catalog, packaging cases & pricing' },
   { key: 'warehouse', label: 'Warehouse Inventory', path: '/admin/warehouse', description: 'Main depot stock, FIFO batch lots & adjustments' },
   { key: 'transfers', label: 'Stock Transfers', path: '/admin/transfers', description: 'Truck dispatch loading & route EOD offload returns' },

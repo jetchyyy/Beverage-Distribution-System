@@ -21,6 +21,7 @@ import { ReturnablesPundoPage } from './pages/admin/ReturnablesPundoPage';
 import { PurchasingPage } from './pages/admin/PurchasingPage';
 import { PromotionsPage } from './pages/admin/PromotionsPage';
 import { ReportsPage } from './pages/admin/ReportsPage';
+import { AnalyticsPage } from './pages/admin/AnalyticsPage';
 import { SettingsPage } from './pages/admin/SettingsPage';
 import { UserManagementPage } from './pages/admin/UserManagementPage';
 
@@ -73,6 +74,7 @@ export const App: React.FC = () => {
                         <Route path="pundo" element={<ReturnablesPundoPage />} />
                         <Route path="purchasing" element={<PurchasingPage />} />
                         <Route path="reports" element={<ReportsPage />} />
+                        <Route path="analytics" element={<AnalyticsPage />} />
                         <Route path="users" element={<UserManagementPage />} />
                         <Route path="settings" element={<SettingsPage />} />
                       </Routes>
