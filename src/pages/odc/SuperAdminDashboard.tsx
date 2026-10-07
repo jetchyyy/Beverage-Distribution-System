@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { useTenant } from '../../context/TenantContext';
+import { useModal } from '../../context/ModalContext';
 import { EmptyState } from '../../components/EmptyState';
 import {
   Building2,
@@ -26,10 +27,31 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Badge } from '../../components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '../../components/ui/dialog';
 
 export const SuperAdminDashboard: React.FC = () => {
   const { profile, signOut, createSecondaryUser } = useAuth();
   const { setDevTenantSlug, domainName } = useTenant();
+  const { showError, showSuccess } = useModal();
   const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<'overview' | 'registry' | 'applications' | 'qr_cms' | 'plans'>('registry');
@@ -255,8 +277,15 @@ export const SuperAdminDashboard: React.FC = () => {
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();
+      showSuccess({
+        title: 'Export Complete',
+        description: `Tenant backup for '${t.name}' downloaded successfully.`,
+      });
     } catch (err: any) {
-      alert('Failed to export tenant data: ' + (err.message || err));
+      showError({
+        title: 'Export Failed',
+        description: 'Failed to export tenant data: ' + (err.message || err),
+      });
     } finally {
       setDownloadingId(null);
     }
@@ -273,7 +302,6 @@ export const SuperAdminDashboard: React.FC = () => {
     try {
       const tId = resettingTenant.id;
 
-      // Wipe operational transaction tables so tenant starts from scratch
       await supabase.from('sales').delete().eq('tenant_id', tId);
       await supabase.from('pundo_ledger').delete().eq('tenant_id', tId);
       await supabase.from('stock_transfers').delete().eq('tenant_id', tId);
@@ -286,11 +314,18 @@ export const SuperAdminDashboard: React.FC = () => {
       try { await supabase.from('truck_reconciliations').delete().eq('tenant_id', tId); } catch (_) {}
 
       setIsResetModalOpen(false);
+      const tenantName = resettingTenant.name;
       setResettingTenant(null);
-      alert(`Tenant '${resettingTenant.name}' data reset successfully! Organization can now start fresh from scratch.`);
+      showSuccess({
+        title: 'Tenant Reset Completed',
+        description: `Tenant '${tenantName}' data was reset successfully. The organization can now start fresh.`,
+      });
       fetchTenants();
     } catch (err: any) {
-      alert('Failed to reset tenant data: ' + (err.message || err));
+      showError({
+        title: 'Reset Failed',
+        description: 'Failed to reset tenant data: ' + (err.message || err),
+      });
     } finally {
       setSaving(false);
     }
@@ -324,19 +359,19 @@ DO UPDATE SET
   };
 
   return (
-    <div className="min-h-screen bg-[#090d16] text-slate-100 flex font-sans select-none">
+    <div className="min-h-screen bg-zinc-50 text-zinc-900 flex font-sans select-none">
       {/* Sidebar Navigation */}
-      <aside className="w-64 bg-[#0d1322] border-r border-slate-800/80 flex flex-col justify-between p-4 shrink-0">
+      <aside className="w-64 bg-white border-r border-zinc-200 flex flex-col justify-between p-4 shrink-0">
         <div className="space-y-6">
-          {/* Superadmin Header */}
+          {/* Header */}
           <div className="flex items-center space-x-3 px-2 py-1">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-600 to-rose-500 flex items-center justify-center font-black text-white text-lg shadow-lg shadow-pink-500/25">
-              Ω
+            <div className="w-8 h-8 rounded-lg bg-zinc-900 flex items-center justify-center font-bold text-white text-sm">
+              ODC
             </div>
             <div>
-              <h2 className="font-extrabold text-sm text-white leading-tight">SaaS Superadmin</h2>
-              <p className="text-[10px] text-pink-400 font-mono tracking-wider uppercase font-bold">
-                ODC PLATFORM CMS
+              <h2 className="font-bold text-sm text-zinc-900 leading-tight">Platform Admin</h2>
+              <p className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase font-semibold">
+                Superadmin CMS
               </p>
             </div>
           </div>
@@ -345,10 +380,10 @@ DO UPDATE SET
           <nav className="space-y-1">
             <button
               onClick={() => setActiveTab('overview')}
-              className={`w-full flex items-center space-x-3 px-3.5 py-3 rounded-2xl text-xs font-semibold transition-all ${
+              className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
                 activeTab === 'overview'
-                  ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30'
-                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                  ? 'bg-zinc-900 text-white shadow-xs'
+                  : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
               }`}
             >
               <LayoutDashboard className="w-4 h-4" />
@@ -357,10 +392,10 @@ DO UPDATE SET
 
             <button
               onClick={() => setActiveTab('registry')}
-              className={`w-full flex items-center space-x-3 px-3.5 py-3 rounded-2xl text-xs font-semibold transition-all ${
+              className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
                 activeTab === 'registry'
-                  ? 'bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow-lg shadow-pink-500/30'
-                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                  ? 'bg-zinc-900 text-white shadow-xs'
+                  : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
               }`}
             >
               <Layers className="w-4 h-4" />
@@ -369,10 +404,10 @@ DO UPDATE SET
 
             <button
               onClick={() => setActiveTab('applications')}
-              className={`w-full flex items-center space-x-3 px-3.5 py-3 rounded-2xl text-xs font-semibold transition-all ${
+              className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
                 activeTab === 'applications'
-                  ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30'
-                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                  ? 'bg-zinc-900 text-white shadow-xs'
+                  : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
               }`}
             >
               <Plus className="w-4 h-4" />
@@ -381,10 +416,10 @@ DO UPDATE SET
 
             <button
               onClick={() => setActiveTab('qr_cms')}
-              className={`w-full flex items-center space-x-3 px-3.5 py-3 rounded-2xl text-xs font-semibold transition-all ${
+              className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
                 activeTab === 'qr_cms'
-                  ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30'
-                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                  ? 'bg-zinc-900 text-white shadow-xs'
+                  : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
               }`}
             >
               <QrCode className="w-4 h-4" />
@@ -393,492 +428,470 @@ DO UPDATE SET
 
             <button
               onClick={() => setActiveTab('plans')}
-              className={`w-full flex items-center space-x-3 px-3.5 py-3 rounded-2xl text-xs font-semibold transition-all ${
+              className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
                 activeTab === 'plans'
-                  ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30'
-                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                  ? 'bg-zinc-900 text-white shadow-xs'
+                  : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
               }`}
             >
               <CreditCard className="w-4 h-4" />
-              <span>Subscription Plans CMS</span>
+              <span>Subscription Plans</span>
             </button>
           </nav>
         </div>
 
         {/* User Profile & Logout */}
-        <div className="pt-4 border-t border-slate-800/80 space-y-3">
+        <div className="pt-4 border-t border-zinc-200 space-y-3">
           <div className="flex items-center space-x-3 px-2">
-            <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-pink-400">
-              AD
+            <div className="w-8 h-8 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center text-xs font-bold text-zinc-900">
+              SA
             </div>
             <div className="truncate">
-              <p className="text-xs font-bold text-white truncate">{profile?.email || 'superadmin@odc.com'}</p>
-              <p className="text-[10px] text-slate-400 uppercase font-mono tracking-wider">SYSTEM OPERATOR</p>
+              <p className="text-xs font-semibold text-zinc-900 truncate">{profile?.email || 'superadmin@odc.com'}</p>
+              <p className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider font-semibold">SUPERADMIN</p>
             </div>
           </div>
 
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => signOut().then(() => navigate('/login'))}
-            className="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-slate-900 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 text-xs font-semibold transition-colors border border-slate-800"
+            className="w-full gap-1.5 text-xs text-zinc-600"
           >
-            <LogOut className="w-4 h-4" />
-            <span>Platform Logout</span>
-          </button>
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sign Out</span>
+          </Button>
         </div>
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 p-8 overflow-y-auto bg-[#090d16]">
+      <main className="flex-1 p-8 overflow-y-auto bg-zinc-50">
         {activeTab === 'overview' && (
-          <div className="space-y-8">
-            <div className="border-b border-slate-800/80 pb-5">
-              <h1 className="text-3xl font-extrabold text-white tracking-tight">SaaS Metrics Overview</h1>
-              <p className="text-slate-400 text-sm mt-1">Real-time multi-tenant platform metrics & subscription revenue</p>
+          <div className="space-y-6">
+            <div className="border-b border-zinc-200 pb-5">
+              <h1 className="text-2xl font-bold tracking-tight text-zinc-900">SaaS Metrics Overview</h1>
+              <p className="text-sm text-zinc-500 mt-1">Real-time platform metrics and subscription health</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-              <div className="bg-[#0f172a] border border-slate-800 rounded-3xl p-6">
-                <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-xs uppercase font-mono tracking-wider font-semibold">Active Tenants</span>
-                  <Building2 className="w-5 h-5 text-pink-400" />
-                </div>
-                <div className="text-3xl font-black text-white mt-3">{tenants.length}</div>
-                <p className="text-xs text-slate-500 mt-1">Live distributor organizations</p>
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <CardDescription className="text-xs uppercase font-mono font-semibold">Active Tenants</CardDescription>
+                    <Building2 className="w-4 h-4" />
+                  </div>
+                  <CardTitle className="text-2xl font-bold text-zinc-900 mt-1">{tenants.length}</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <p className="text-xs text-zinc-500">Live distributor organizations</p>
+                </CardContent>
+              </Card>
 
-              <div className="bg-[#0f172a] border border-slate-800 rounded-3xl p-6">
-                <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-xs uppercase font-mono tracking-wider font-semibold">Monthly MRR</span>
-                  <DollarSign className="w-5 h-5 text-emerald-400" />
-                </div>
-                <div className="text-3xl font-black text-emerald-400 mt-3">₱148,500</div>
-                <p className="text-xs text-slate-500 mt-1">+12.4% vs last month</p>
-              </div>
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <CardDescription className="text-xs uppercase font-mono font-semibold">Monthly MRR</CardDescription>
+                    <DollarSign className="w-4 h-4" />
+                  </div>
+                  <CardTitle className="text-2xl font-bold text-zinc-900 mt-1">₱148,500</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <p className="text-xs text-zinc-500">+12.4% vs last month</p>
+                </CardContent>
+              </Card>
 
-              <div className="bg-[#0f172a] border border-slate-800 rounded-3xl p-6">
-                <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-xs uppercase font-mono tracking-wider font-semibold">Platform Users</span>
-                  <Users className="w-5 h-5 text-cyan-400" />
-                </div>
-                <div className="text-3xl font-black text-white mt-3">84</div>
-                <p className="text-xs text-slate-500 mt-1">Admins, agents & warehouse staff</p>
-              </div>
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <CardDescription className="text-xs uppercase font-mono font-semibold">Platform Users</CardDescription>
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <CardTitle className="text-2xl font-bold text-zinc-900 mt-1">84</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <p className="text-xs text-zinc-500">Admins, agents & warehouse staff</p>
+                </CardContent>
+              </Card>
 
-              <div className="bg-[#0f172a] border border-slate-800 rounded-3xl p-6">
-                <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-xs uppercase font-mono tracking-wider font-semibold">System Health</span>
-                  <TrendingUp className="w-5 h-5 text-indigo-400" />
-                </div>
-                <div className="text-3xl font-black text-indigo-400 mt-3">99.98%</div>
-                <p className="text-xs text-slate-500 mt-1">Uptime operational</p>
-              </div>
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <CardDescription className="text-xs uppercase font-mono font-semibold">System Health</CardDescription>
+                    <TrendingUp className="w-4 h-4" />
+                  </div>
+                  <CardTitle className="text-2xl font-bold text-zinc-900 mt-1">99.98%</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <p className="text-xs text-zinc-500">Uptime operational</p>
+                </CardContent>
+              </Card>
             </div>
           </div>
         )}
 
         {activeTab === 'registry' && (
           <div className="space-y-6">
-            {/* Header & Onboard Action */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800/80 pb-5">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-zinc-200 pb-5">
               <div>
-                <h1 className="text-3xl font-extrabold text-white tracking-tight">Active Tenant Organizations</h1>
-                <p className="text-slate-400 text-sm mt-1">
-                  Manage active plan scopes, edit branch/user limits, or suspend portal instances.
+                <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Tenant Organizations</h1>
+                <p className="text-sm text-zinc-500 mt-1">
+                  Manage active plan scopes, portal instances, and tenant environments
                 </p>
               </div>
 
-              <div className="flex items-center space-x-3">
-                <button
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
                   onClick={() => setIsSqlModalOpen(true)}
-                  className="px-4 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold border border-slate-800 flex items-center space-x-2 transition-all"
+                  className="gap-1.5"
                 >
-                  <Code className="w-4 h-4 text-emerald-400" />
-                  <span>SuperAdmin SQL</span>
-                </button>
-                <button
+                  <Code className="w-4 h-4" />
+                  <span>Superadmin SQL</span>
+                </Button>
+                <Button
                   onClick={() => setIsModalOpen(true)}
-                  className="px-5 py-3 rounded-2xl bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white text-xs font-extrabold tracking-wide shadow-lg shadow-pink-500/25 flex items-center space-x-2 transition-all"
+                  className="gap-1.5"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>+ Manual Onboard Tenant</span>
-                </button>
+                  <span>Onboard Tenant</span>
+                </Button>
               </div>
             </div>
 
             {/* Tenant Registry Table */}
             {loading ? (
-              <div className="text-center py-24 text-slate-500 animate-pulse text-sm">Loading tenant accounts...</div>
+              <div className="text-center py-24 text-zinc-400 text-sm">Loading tenant accounts...</div>
             ) : tenants.length === 0 ? (
               <EmptyState
                 title="No Active Tenants"
                 description="No distributor tenant organizations have been onboarded yet."
-                icon={<Building2 className="w-10 h-10 text-pink-400" />}
-                actionText="Manual Onboard Tenant"
+                icon={<Building2 className="w-8 h-8 text-zinc-400" />}
+                actionText="Onboard Tenant"
                 onAction={() => setIsModalOpen(true)}
               />
             ) : (
-              <div className="bg-[#0f172a] border border-slate-800/90 rounded-3xl overflow-hidden shadow-2xl">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs text-slate-300">
-                    <thead className="bg-[#0b1120] text-slate-400 uppercase text-[11px] font-bold tracking-wider border-b border-slate-800">
-                      <tr>
-                        <th className="px-6 py-4">Tenant Name</th>
-                        <th className="px-6 py-4">Subdomain</th>
-                        <th className="px-6 py-4">Business Model</th>
-                        <th className="px-6 py-4">Plan & Billing</th>
-                        <th className="px-6 py-4">Quotas (Branches/Users)</th>
-                        <th className="px-6 py-4">Status</th>
-                        <th className="px-6 py-4 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/80 font-medium">
+              <Card>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Tenant Name</TableHead>
+                        <TableHead>Subdomain</TableHead>
+                        <TableHead>Model</TableHead>
+                        <TableHead>Plan</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {tenants.map((t) => (
-                        <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
-                          {/* Tenant Name */}
-                          <td className="px-6 py-4 font-extrabold text-white text-sm">
+                        <TableRow key={t.id}>
+                          <TableCell className="font-semibold text-zinc-900">
                             {t.name}
-                          </td>
+                          </TableCell>
 
-                          {/* Subdomain */}
-                          <td className="px-6 py-4 font-mono text-xs">
-                            <div className="space-y-1">
-                              {(() => {
-                                const isLocal = window.location.hostname.includes('localhost') || window.location.hostname.includes('127.0.0.1');
-                                const tenantUrl = isLocal
-                                  ? `http://${t.slug}.localhost:${window.location.port || '5173'}`
-                                  : `https://${t.slug}.${domainName}`;
+                          <TableCell className="font-mono text-xs">
+                            {(() => {
+                              const isLocal = window.location.hostname.includes('localhost') || window.location.hostname.includes('127.0.0.1');
+                              const tenantUrl = isLocal
+                                ? `http://${t.slug}.localhost:${window.location.port || '5173'}`
+                                : `https://${t.slug}.${domainName}`;
 
-                                return (
-                                  <a
-                                    href={tenantUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="text-pink-400 hover:underline flex items-center space-x-1"
-                                  >
-                                    <span>{t.slug}.{domainName}</span>
-                                    <ExternalLink className="w-3 h-3 opacity-70" />
-                                  </a>
-                                );
-                              })()}
-                            </div>
-                          </td>
+                              return (
+                                <a
+                                  href={tenantUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-zinc-900 hover:underline flex items-center gap-1"
+                                >
+                                  <span>{t.slug}.{domainName}</span>
+                                  <ExternalLink className="w-3 h-3 opacity-60" />
+                                </a>
+                              );
+                            })()}
+                          </TableCell>
 
-                          {/* Business Model */}
-                          <td className="px-6 py-4">
-                            <span className="px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase bg-cyan-950/80 text-cyan-300 border border-cyan-800/60">
-                              BEVERAGE
-                            </span>
-                          </td>
+                          <TableCell>
+                            <Badge variant="outline" className="font-mono text-[10px] uppercase">
+                              Beverage
+                            </Badge>
+                          </TableCell>
 
-                          {/* Plan & Billing */}
-                          <td className="px-6 py-4">
-                            <div className="space-y-0.5">
-                              <span className="inline-block px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase bg-pink-950/80 text-pink-300 border border-pink-800/60">
-                                PROFESSIONAL
-                              </span>
-                              <p className="text-[10px] text-slate-500 font-mono">Monthly</p>
-                            </div>
-                          </td>
+                          <TableCell>
+                            <Badge variant="secondary" className="font-mono text-[10px] uppercase">
+                              Professional
+                            </Badge>
+                          </TableCell>
 
-                          {/* Quotas */}
-                          <td className="px-6 py-4 text-slate-300 font-medium">
-                            3 Locations / 10 staff
-                          </td>
-
-                          {/* Status */}
-                          <td className="px-6 py-4">
-                            <span
-                              className={`px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase border ${
-                                t.status === 'ACTIVE'
-                                  ? 'bg-indigo-600/90 text-white border-indigo-500'
-                                  : 'bg-rose-950/80 text-rose-300 border-rose-800'
-                              }`}
-                            >
+                          <TableCell>
+                            <Badge variant={t.status === 'ACTIVE' ? 'default' : 'secondary'} className="text-xs">
                               {t.status}
-                            </span>
-                          </td>
+                            </Badge>
+                          </TableCell>
 
-                          {/* Actions */}
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex items-center justify-end space-x-3">
-                              <button
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button
+                                variant="outline"
+                                size="sm"
                                 onClick={() => handleEnterTenant(t.slug)}
-                                className="text-cyan-400 hover:text-cyan-300 font-bold text-xs flex items-center space-x-1"
+                                className="h-8 gap-1 text-xs"
                               >
                                 <LogIn className="w-3.5 h-3.5" />
-                                <span>Enter Tenant</span>
-                              </button>
+                                <span>Enter</span>
+                              </Button>
 
-                              <button
-                                onClick={() => toggleTenantStatus(t.id, t.status)}
-                                className="text-pink-400 hover:text-pink-300 font-semibold text-xs"
-                              >
-                                Edit Config
-                              </button>
-
-                              <button
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => handleDownloadTenantData(t)}
                                 disabled={downloadingId === t.id}
-                                className="text-cyan-400 hover:text-cyan-300 p-1.5 rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50"
-                                title="Download Tenant Backup Data (JSON)"
+                                className="h-8 w-8"
+                                title="Download Backup (JSON)"
                               >
-                                <Download className="w-4 h-4" />
-                              </button>
+                                <Download className="w-3.5 h-3.5" />
+                              </Button>
 
-                              <button
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => handleOpenResetModal(t)}
-                                className="text-amber-400 hover:text-amber-300 p-1.5 rounded-lg hover:bg-amber-500/10 transition-colors"
-                                title="Clear Operational Data & Start from Scratch"
+                                className="h-8 w-8 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                                title="Reset Data"
                               >
-                                <RotateCw className="w-4 h-4" />
-                              </button>
+                                <RotateCw className="w-3.5 h-3.5" />
+                              </Button>
 
-                              <button
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => toggleTenantStatus(t.id, t.status)}
-                                className="text-rose-500 hover:text-rose-400 p-1"
-                                title="Suspend Tenant"
+                                className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                title="Toggle Status"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              </Button>
                             </div>
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
             )}
           </div>
         )}
 
         {activeTab === 'applications' && (
           <div className="space-y-6">
-            <h1 className="text-3xl font-extrabold text-white tracking-tight">Applications Queue</h1>
-            <p className="text-slate-400 text-sm">Pending distributor tenant registration requests</p>
-            <div className="py-20 text-center text-slate-500 text-sm">No pending onboarding applications in queue.</div>
+            <h1 className="text-2xl font-bold text-zinc-900">Applications Queue</h1>
+            <p className="text-zinc-500 text-sm">Pending distributor tenant registration requests</p>
+            <div className="py-20 text-center text-zinc-400 text-sm border border-dashed border-zinc-200 rounded-lg">
+              No pending onboarding applications in queue.
+            </div>
           </div>
         )}
 
         {activeTab === 'qr_cms' && (
           <div className="space-y-6">
-            <h1 className="text-3xl font-extrabold text-white tracking-tight">Payment QR CMS</h1>
-            <p className="text-slate-400 text-sm">Manage GCash, Maya, and Bank QR payment gateways for subscriptions</p>
-            <div className="py-20 text-center text-slate-500 text-sm">QR CMS configuration active.</div>
+            <h1 className="text-2xl font-bold text-zinc-900">Payment QR CMS</h1>
+            <p className="text-zinc-500 text-sm">Manage payment gateways for tenant billing</p>
+            <div className="py-20 text-center text-zinc-400 text-sm border border-dashed border-zinc-200 rounded-lg">
+              QR configuration active.
+            </div>
           </div>
         )}
 
         {activeTab === 'plans' && (
           <div className="space-y-6">
-            <h1 className="text-3xl font-extrabold text-white tracking-tight">Subscription Plans CMS</h1>
-            <p className="text-slate-400 text-sm">Configure Starter, Professional, and Enterprise SaaS pricing scopes</p>
-            <div className="py-20 text-center text-slate-500 text-sm">Plan tiers configured.</div>
+            <h1 className="text-2xl font-bold text-zinc-900">Subscription Plans CMS</h1>
+            <p className="text-zinc-500 text-sm">Configure SaaS pricing tiers and scope</p>
+            <div className="py-20 text-center text-zinc-400 text-sm border border-dashed border-zinc-200 rounded-lg">
+              Plan tiers configured.
+            </div>
           </div>
         )}
       </main>
 
       {/* Onboard Tenant Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
-          <div className="bg-[#0f172a] border border-slate-800 rounded-3xl max-w-lg w-full p-7 shadow-2xl text-slate-100 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
-              <h3 className="text-xl font-extrabold text-white">Manual Onboard Tenant Organization</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Onboard Tenant Organization</DialogTitle>
+            <DialogDescription>
+              Create a new isolated distributor workspace.
+            </DialogDescription>
+          </DialogHeader>
+
+          {error && (
+            <div className="p-3 bg-red-50 text-red-600 text-xs rounded-lg">
+              {error}
             </div>
+          )}
 
-            {error && (
-              <div className="p-3 mb-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium">
-                {error}
+          <form onSubmit={handleCreateTenant} className="space-y-4">
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold uppercase text-zinc-900">1. Distributor Details</h4>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Tenant Name *</label>
+                <Input
+                  type="text"
+                  required
+                  placeholder="e.g. DwalHolms Beverage Distribution"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
               </div>
-            )}
 
-            <form onSubmit={handleCreateTenant} className="space-y-4 text-xs">
-              <div className="space-y-3">
-                <h4 className="text-[11px] font-mono font-bold uppercase text-pink-400">1. Distributor Business Details</h4>
-                <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Tenant / Distributor Name *</label>
-                  <input
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Subdomain Slug *</label>
+                <div className="flex items-center">
+                  <Input
                     type="text"
                     required
-                    placeholder="e.g. DwalHolms Beverage Distribution"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-white focus:outline-none focus:border-pink-500"
+                    placeholder="e.g. dwalholms"
+                    value={slug}
+                    onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                    className="rounded-r-none font-mono"
+                  />
+                  <span className="bg-zinc-100 border border-l-0 border-zinc-200 text-zinc-500 px-3 py-2 font-mono text-sm rounded-r-lg">
+                    .{domainName}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Initial Tenant Admin Credentials */}
+            <div className="space-y-3 pt-3 border-t border-zinc-200">
+              <h4 className="text-xs font-bold uppercase text-zinc-900 flex items-center gap-1.5">
+                <UserPlus className="w-3.5 h-3.5 text-zinc-600" />
+                <span>2. Initial Tenant Admin</span>
+              </h4>
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Admin Full Name</label>
+                <Input
+                  type="text"
+                  placeholder="e.g. Juan dela Cruz"
+                  value={adminFullName}
+                  onChange={(e) => setAdminFullName(e.target.value)}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Admin Email</label>
+                  <Input
+                    type="email"
+                    placeholder="admin@dwalholms.com"
+                    value={adminEmail}
+                    onChange={(e) => {
+                      setAdminEmail(e.target.value);
+                      setContactEmail(e.target.value);
+                    }}
                   />
                 </div>
-
                 <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Subdomain Slug *</label>
-                  <div className="flex items-center">
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. dwalholms"
-                      value={slug}
-                      onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-l-2xl px-4 py-2.5 text-white font-mono focus:outline-none focus:border-pink-500"
-                    />
-                    <span className="bg-slate-900 border border-l-0 border-slate-800 text-slate-400 px-4 py-2.5 font-mono rounded-r-2xl">
-                      .{domainName}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Initial Tenant Admin Credentials */}
-              <div className="space-y-3 pt-3 border-t border-slate-800">
-                <h4 className="text-[11px] font-mono font-bold uppercase text-emerald-400 flex items-center space-x-1.5">
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>2. Initial Tenant Admin Login Account</span>
-                </h4>
-
-                <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Admin Full Name</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Juan dela Cruz"
-                    value={adminFullName}
-                    onChange={(e) => setAdminFullName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-white focus:outline-none focus:border-pink-500"
+                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Admin Password</label>
+                  <Input
+                    type="password"
+                    placeholder="••••••••"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
                   />
                 </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block font-semibold text-slate-300 mb-1">Admin Login Email</label>
-                    <input
-                      type="email"
-                      placeholder="admin@dwalholms.com"
-                      value={adminEmail}
-                      onChange={(e) => {
-                        setAdminEmail(e.target.value);
-                        setContactEmail(e.target.value);
-                      }}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-3.5 py-2.5 text-white focus:outline-none focus:border-pink-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-slate-300 mb-1">Admin Login Password</label>
-                    <input
-                      type="password"
-                      placeholder="••••••••"
-                      value={adminPassword}
-                      onChange={(e) => setAdminPassword(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-3.5 py-2.5 text-white focus:outline-none focus:border-pink-500"
-                    />
-                  </div>
-                </div>
               </div>
+            </div>
 
-              <div className="pt-4 border-t border-slate-800 flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2.5 rounded-2xl bg-slate-900 text-slate-300 hover:bg-slate-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white font-bold shadow-lg shadow-pink-500/30 disabled:opacity-50"
-                >
-                  {saving ? 'Onboarding Tenant...' : 'Onboard Tenant'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? 'Onboarding...' : 'Onboard Tenant'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* SQL Modal */}
-      {isSqlModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
-          <div className="bg-[#0f172a] border border-slate-800 rounded-3xl max-w-2xl w-full p-6 shadow-2xl text-slate-100 flex flex-col max-h-[85vh]">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
-              <div className="flex items-center space-x-2">
-                <Code className="w-5 h-5 text-emerald-400" />
-                <h3 className="text-lg font-bold">SQL Script for superadmin@odc.com</h3>
-              </div>
-              <button onClick={() => setIsSqlModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+      <Dialog open={isSqlModalOpen} onOpenChange={setIsSqlModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <Code className="w-5 h-5 text-zinc-700" />
+              <DialogTitle>Superadmin SQL Script</DialogTitle>
             </div>
-            <p className="text-xs text-slate-400 mb-3">
-              Run this script in your Supabase SQL Editor to make <code className="text-emerald-400 font-mono font-bold">superadmin@odc.com</code> a platform Superadmin profile:
-            </p>
-            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 font-mono text-xs text-emerald-400 overflow-y-auto flex-1 mb-4">
-              <pre>{superAdminSqlScript}</pre>
-            </div>
-            <div className="flex justify-between items-center">
-              <button
-                onClick={handleCopySql}
-                className="px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center space-x-2 shadow"
-              >
-                {copiedSql ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                <span>{copiedSql ? 'Copied SQL Script!' : 'Copy SQL Script'}</span>
-              </button>
-              <button
-                onClick={() => setIsSqlModalOpen(false)}
-                className="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white text-xs"
-              >
-                Close
-              </button>
-            </div>
+            <DialogDescription>
+              Execute in Supabase SQL Editor to grant platform superadmin rights.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="bg-zinc-950 p-4 rounded-lg font-mono text-xs text-zinc-200 overflow-x-auto my-2">
+            <pre>{superAdminSqlScript}</pre>
           </div>
-        </div>
-      )}
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setIsSqlModalOpen(false)}>
+              Close
+            </Button>
+            <Button onClick={handleCopySql} className="gap-1.5">
+              {copiedSql ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              <span>{copiedSql ? 'Copied!' : 'Copy Script'}</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Reset Tenant Data Confirmation Modal */}
-      {isResetModalOpen && resettingTenant && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
-          <div className="bg-[#0f172a] border border-amber-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl text-slate-100 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center space-x-2 text-amber-400 font-extrabold">
+      <Dialog open={isResetModalOpen} onOpenChange={setIsResetModalOpen}>
+        {resettingTenant && (
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <div className="flex items-center gap-2 text-red-600">
                 <AlertTriangle className="w-5 h-5" />
-                <h3 className="text-lg">Clear Tenant Operational Data</h3>
+                <DialogTitle>Clear Tenant Data</DialogTitle>
               </div>
-              <button onClick={() => setIsResetModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
-            </div>
+              <DialogDescription>
+                Permanent data wipe for organization {resettingTenant.name}.
+              </DialogDescription>
+            </DialogHeader>
 
-            <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-200 text-xs leading-relaxed space-y-2">
-              <p className="font-bold">
-                ⚠️ PERMANENT DATA RESET WARNING:
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs leading-relaxed space-y-2">
+              <p className="font-semibold">
+                This will delete all operational transactions:
               </p>
-              <p>
-                Are you sure you want to clear all operational transactions for tenant <strong className="text-white">{resettingTenant.name}</strong>?
-              </p>
-              <ul className="list-disc pl-4 space-y-1 text-[11px] text-amber-300 font-mono">
+              <ul className="list-disc pl-4 space-y-0.5 text-[11px] font-mono">
                 <li>Sales & Delivery Statements</li>
                 <li>Stock Transfers & Offloads</li>
-                <li>Warehouse & Truck Inventory Balances</li>
-                <li>Empty Container Returnable Balances</li>
+                <li>Inventory Balances</li>
+                <li>Empty Container Balances</li>
                 <li>PUNDO Deposit Ledgers</li>
-                <li>Stock In Receipts & FIFO Batches</li>
+                <li>Stock In Receipts & Batches</li>
               </ul>
-              <p className="text-[11px] text-slate-400 italic">
-                Catalog definitions (products, packaging, stores & user accounts) will be preserved so the tenant can start fresh from scratch.
+              <p className="text-[11px] text-zinc-600 italic">
+                Products, stores, and user accounts will remain intact.
               </p>
             </div>
 
-            <div className="flex justify-end space-x-3 pt-3 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setIsResetModalOpen(false)}
-                className="px-4 py-2.5 rounded-2xl bg-slate-900 text-slate-300 hover:bg-slate-800 text-xs font-semibold"
-              >
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsResetModalOpen(false)}>
                 Cancel
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="destructive"
                 disabled={saving}
                 onClick={confirmResetTenantData}
-                className="px-5 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs shadow-lg shadow-amber-600/30 border border-amber-500/40"
               >
-                {saving ? 'Clearing Tenant Data...' : 'Confirm & Clear Data to Scratch'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+                {saving ? 'Clearing...' : 'Confirm Clear Data'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 };

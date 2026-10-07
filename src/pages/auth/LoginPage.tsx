@@ -6,6 +6,9 @@ import { ConnectionBanner } from '../../components/ConnectionBanner';
 import { DevTenantSelector } from '../../components/DevTenantSelector';
 import { ShieldCheck, Mail, Lock, ArrowRight, Truck, LayoutDashboard, Eye, EyeOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
 
 export const LoginPage: React.FC = () => {
   const { signIn } = useAuth();
@@ -27,7 +30,6 @@ export const LoginPage: React.FC = () => {
     if (signInErr) {
       setError(signInErr.message || 'Invalid email or password.');
     } else {
-      // Check role from user profile and navigate to appropriate portal
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         const { data: prof } = await supabase
@@ -51,112 +53,116 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between">
+    <div className="min-h-screen bg-zinc-50 text-zinc-900 flex flex-col justify-between">
       <ConnectionBanner />
       <DevTenantSelector />
 
       <div className="flex-1 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-6">
-          <div className="text-center space-y-2">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-600 flex items-center justify-center mx-auto text-2xl font-black text-white shadow-lg shadow-indigo-600/30">
+        <Card className="max-w-md w-full shadow-lg border-zinc-200 bg-white">
+          <CardHeader className="text-center space-y-2 pb-4">
+            <div className="w-12 h-12 rounded-lg bg-zinc-900 flex items-center justify-center mx-auto text-xl font-bold text-white shadow-xs">
               {tenant ? tenant.name.charAt(0) : 'B'}
             </div>
-            <h1 className="text-2xl font-extrabold text-white">
+            <CardTitle className="text-xl font-bold tracking-tight text-zinc-900">
               {tenant ? tenant.name : 'Beverage Distribution System'}
-            </h1>
-            <p className="text-xs text-slate-400">
-              Multi-Tenant Inventory, Truck Delivery & PUNDO Management System
-            </p>
-          </div>
+            </CardTitle>
+            <CardDescription className="text-xs text-zinc-500">
+              ODC Inventory, Truck Delivery & PUNDO Management
+            </CardDescription>
+          </CardHeader>
 
-          {!isSupabaseConfigured && (
-            <div className="p-4 bg-indigo-950/60 border border-indigo-700/60 rounded-2xl text-xs text-indigo-200 space-y-3">
-              <p className="font-semibold text-white">⚡ Supabase Direct Portal Access:</p>
-              <p>Choose an interface to enter in local demonstration mode:</p>
+          <CardContent className="space-y-5">
+            {!isSupabaseConfigured && (
+              <div className="p-3.5 bg-zinc-100 border border-zinc-200 rounded-lg text-xs text-zinc-700 space-y-2.5">
+                <p className="font-semibold text-zinc-900">Direct Demo Access:</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => navigate('/admin')}
+                    className="w-full flex items-center justify-center space-x-1.5"
+                  >
+                    <LayoutDashboard className="w-3.5 h-3.5" />
+                    <span>Admin Portal</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate('/agent')}
+                    className="w-full flex items-center justify-center space-x-1.5"
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    <span>Agent Tablet</span>
+                  </Button>
+                </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <button
-                  onClick={() => navigate('/admin')}
-                  className="py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold flex items-center justify-center space-x-1.5 shadow"
-                >
-                  <LayoutDashboard className="w-4 h-4" />
-                  <span>Admin Portal</span>
-                </button>
-                <button
-                  onClick={() => navigate('/agent')}
-                  className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center justify-center space-x-1.5 shadow"
-                >
-                  <Truck className="w-4 h-4" />
-                  <span>Agent Tablet</span>
-                </button>
+                <div className="pt-2 border-t border-zinc-200 text-center">
+                  <button
+                    onClick={() => navigate('/odc')}
+                    className="text-[11px] text-zinc-600 hover:text-zinc-900 hover:underline inline-flex items-center space-x-1 font-mono cursor-pointer"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>ODC Superadmin (/odc)</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-md font-medium">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-zinc-700">Email Address</label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
+                  <Input
+                    type="email"
+                    required
+                    placeholder="agent@distributor.com or admin@distributor.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
               </div>
 
-              <div className="pt-2 border-t border-indigo-800/80 text-center">
-                <button
-                  onClick={() => navigate('/odc')}
-                  className="text-[11px] text-indigo-400 hover:underline inline-flex items-center space-x-1 font-mono"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>ODC Superadmin (/odc)</span>
-                </button>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-zinc-700">Password</label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
+                  <Input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="pl-9 pr-9"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-2.5 text-zinc-400 hover:text-zinc-700 cursor-pointer"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
 
-          {error && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs rounded-xl font-medium">
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Email Address</label>
-              <div className="relative">
-                <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
-                <input
-                  type="email"
-                  required
-                  placeholder="agent@distributor.com or admin@distributor.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-10 pr-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Password</label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-10 pr-10 py-3 text-sm text-white focus:outline-none focus:border-indigo-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-3.5 text-slate-500 hover:text-slate-300"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm flex items-center justify-center space-x-2 shadow-lg shadow-indigo-600/30 touch-target"
-            >
-              <span>{loading ? 'Authenticating...' : 'Sign In with Email & Password'}</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </form>
-        </div>
+              <Button
+                type="submit"
+                disabled={loading}
+                className="w-full h-10 mt-2 font-medium"
+              >
+                <span>{loading ? 'Authenticating...' : 'Sign In'}</span>
+                <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

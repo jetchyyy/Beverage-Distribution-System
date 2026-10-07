@@ -12,18 +12,18 @@ export const DevTenantSelector: React.FC = () => {
   if (!isSuperAdmin || availableTenants.length === 0) return null;
 
   return (
-    <div className="bg-indigo-950/90 border-b border-indigo-800/80 px-4 py-2 text-xs flex items-center justify-between text-indigo-200">
+    <div className="bg-zinc-900 border-b border-zinc-800 px-4 py-2 text-xs flex items-center justify-between text-zinc-300">
       <div className="flex items-center space-x-2">
-        <ShieldCheck className="w-4 h-4 text-emerald-400" />
-        <span className="font-bold text-slate-100">SuperAdmin Tenant Switcher:</span>
-        <span className="text-indigo-300">Viewing Tenant: <strong>{tenant ? tenant.name : (tenantSlug || 'None')}</strong></span>
+        <ShieldCheck className="w-4 h-4 text-zinc-300" />
+        <span className="font-semibold text-white">SuperAdmin Context:</span>
+        <span className="text-zinc-400">Viewing Tenant: <strong className="text-white">{tenant ? tenant.name : (tenantSlug || 'None')}</strong></span>
       </div>
       <div className="flex items-center space-x-2">
-        <Building2 className="w-3.5 h-3.5 text-indigo-400" />
+        <Building2 className="w-3.5 h-3.5 text-zinc-400" />
         <select
           value={tenantSlug || ''}
           onChange={(e) => setDevTenantSlug(e.target.value)}
-          className="bg-slate-900 border border-indigo-700 text-white rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer font-medium"
+          className="bg-zinc-800 border border-zinc-700 text-white rounded-md px-2.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-zinc-400 cursor-pointer font-medium"
         >
           <option value="">Select Tenant Context...</option>
           {availableTenants.map((t) => (

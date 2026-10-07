@@ -23,6 +23,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Button } from '../components/ui/button';
 
 interface AdminLayoutProps {
   children: React.ReactNode;
@@ -62,38 +63,38 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const navItems = allNavItems.filter((item) => hasFeatureAccess(item.featureKey));
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-zinc-50 text-zinc-900 flex flex-col font-sans">
       <ConnectionBanner />
       <DevTenantSelector />
 
-      <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-30 px-4 py-3 flex items-center justify-between">
+      <header className="bg-white border-b border-zinc-200 sticky top-0 z-30 px-4 py-2.5 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
-            className="md:hidden p-2 text-slate-400 hover:text-white rounded-lg bg-slate-800"
+            className="md:hidden p-1.5 text-zinc-600 hover:text-zinc-900 rounded-md border border-zinc-200 hover:bg-zinc-100 cursor-pointer"
           >
             {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-md">
+          <div className="flex items-center space-x-2.5">
+            <div className="w-8 h-8 rounded-md bg-zinc-900 flex items-center justify-center font-bold text-white shadow-xs text-sm">
               {tenant ? tenant.name.charAt(0) : 'B'}
             </div>
             <div>
-              <h2 className="font-extrabold text-sm text-white leading-tight">
+              <h2 className="font-semibold text-sm text-zinc-900 leading-tight">
                 {tenant ? tenant.name : 'Beverage Distribution System'}
               </h2>
-              <p className="text-[10px] text-indigo-400 uppercase font-mono tracking-wider">
+              <p className="text-[11px] text-zinc-500 font-mono">
                 {tenant ? tenant.slug : 'Main Tenant'}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-3">
           {isSuperAdmin && (
             <Link
               to="/odc"
-              className="hidden sm:flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-950 border border-indigo-700/60 text-indigo-300 hover:text-white text-xs font-semibold"
+              className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-zinc-100 border border-zinc-200 text-zinc-800 hover:bg-zinc-200 text-xs font-medium"
             >
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>ODC Superadmin</span>
@@ -101,24 +102,26 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
           )}
 
           <div className="text-right hidden sm:block">
-            <p className="text-xs font-bold text-slate-200">{profile?.full_name || 'User'}</p>
-            <p className="text-[10px] text-slate-400 uppercase">{profile?.role || 'Staff'}</p>
+            <p className="text-xs font-medium text-zinc-900">{profile?.full_name || 'User'}</p>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{profile?.role || 'Staff'}</p>
           </div>
 
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => signOut().then(() => navigate('/login'))}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-rose-400 transition-colors"
+            className="text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100"
             title="Sign Out"
           >
             <LogOut className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
       </header>
 
       <div className="flex-1 flex overflow-hidden">
-        <aside className="hidden md:flex flex-col w-64 bg-slate-900 border-r border-slate-800 p-4 space-y-1 overflow-y-auto">
-          <div className="text-[11px] font-mono uppercase text-slate-500 font-semibold px-3 mb-2">
-            Navigation Menu
+        <aside className="hidden md:flex flex-col w-60 bg-white border-r border-zinc-200 p-3 space-y-0.5 overflow-y-auto">
+          <div className="text-[10px] font-semibold tracking-wider uppercase text-zinc-400 px-3 py-2">
+            Main Menu
           </div>
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -127,35 +130,35 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
               <Link
                 key={item.path}
                 to={item.path}
-                className={`flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                className={`flex items-center space-x-2.5 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                   active
-                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25 font-semibold'
-                    : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
+                    ? 'bg-zinc-900 text-zinc-50 shadow-xs'
+                    : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
                 }`}
               >
-                <Icon className={`w-4 h-4 ${active ? 'text-white' : 'text-slate-400'}`} />
+                <Icon className={`w-4 h-4 ${active ? 'text-zinc-50' : 'text-zinc-500'}`} />
                 <span>{item.label}</span>
               </Link>
             );
           })}
 
-          <div className="pt-6 mt-auto border-t border-slate-800">
+          <div className="pt-4 mt-auto border-t border-zinc-200">
             <Link
               to="/agent"
-              className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 font-medium text-xs transition-colors border border-slate-700"
+              className="flex items-center justify-between px-3 py-2 rounded-md bg-zinc-50 hover:bg-zinc-100 text-zinc-700 font-medium text-xs border border-zinc-200 transition-colors"
             >
-              <span>Switch to Agent Mobile View</span>
-              <Truck className="w-4 h-4" />
+              <span>Agent Mobile View</span>
+              <Truck className="w-3.5 h-3.5 text-zinc-500" />
             </Link>
           </div>
         </aside>
 
         {mobileOpen && (
-          <div className="md:hidden fixed inset-0 z-40 bg-slate-950/80 backdrop-blur-sm flex">
-            <div className="w-72 bg-slate-900 h-full p-4 border-r border-slate-800 flex flex-col space-y-1">
-              <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
-                <span className="font-bold text-white text-sm">Navigation</span>
-                <button onClick={() => setMobileOpen(false)} className="text-slate-400">
+          <div className="md:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-xs flex">
+            <div className="w-64 bg-white h-full p-4 border-r border-zinc-200 flex flex-col space-y-1">
+              <div className="flex items-center justify-between mb-3 border-b border-zinc-200 pb-2">
+                <span className="font-semibold text-zinc-900 text-sm">Navigation</span>
+                <button onClick={() => setMobileOpen(false)} className="text-zinc-500 hover:text-zinc-900">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -168,10 +171,10 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
                     key={item.path}
                     to={item.path}
                     onClick={() => setMobileOpen(false)}
-                    className={`flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                    className={`flex items-center space-x-2.5 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                       active
-                        ? 'bg-indigo-600 text-white shadow-md font-semibold'
-                        : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                        ? 'bg-zinc-900 text-white'
+                        : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
                     }`}
                   >
                     <Icon className="w-4 h-4" />
@@ -180,11 +183,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
                 );
               })}
 
-              <div className="pt-6 mt-auto border-t border-slate-800">
+              <div className="pt-4 mt-auto border-t border-zinc-200">
                 <Link
                   to="/agent"
                   onClick={() => setMobileOpen(false)}
-                  className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-indigo-600 text-white font-semibold text-xs"
+                  className="flex items-center justify-between px-3 py-2 rounded-md bg-zinc-900 text-white font-medium text-xs"
                 >
                   <span>Agent Tablet Portal</span>
                   <Truck className="w-4 h-4" />
@@ -194,7 +197,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
           </div>
         )}
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-950">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-zinc-50/50">{children}</main>
       </div>
     </div>
   );

@@ -8,22 +8,30 @@ import {
   ShoppingBag,
   Store,
   DollarSign,
-
   Search,
   Eye,
-
-  FileText,
-  Clock,
   Printer,
   Package,
-
 } from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Badge } from '../../components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '../../components/ui/dialog';
 
 export const AgentSalesHistory: React.FC = () => {
   const { tenant } = useTenant();
   const { profile } = useAuth();
 
   const [salesList, setSalesList] = useState<any[]>([]);
+  const [pundoMap, setPundoMap] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState<'TODAY' | 'YESTERDAY' | 'ALL'>('TODAY');
   const [searchQuery, setSearchQuery] = useState('');
@@ -35,37 +43,40 @@ export const AgentSalesHistory: React.FC = () => {
   const [todayCasesCount, setTodayCasesCount] = useState(0);
 
   const fetchAgentSalesHistory = async () => {
-    if (!tenant || !profile?.id) {
+    if (!tenant) {
       setLoading(false);
       return;
     }
     setLoading(true);
 
     try {
-      // 1. Resolve Active Agent Record for the logged-in user
-      const { data: agentData } = await supabase
-        .from('agents')
-        .select('id, assigned_truck_id')
-        .eq('tenant_id', tenant.id)
-        .eq('user_id', profile.id)
-        .limit(1)
-        .maybeSingle();
+      let activeAgentId = null;
+      let activeTruckId = null;
 
-      let activeAgentId = agentData?.id;
-      let activeTruckId = agentData?.assigned_truck_id;
+      if (profile?.id) {
+        const { data: agentData } = await supabase
+          .from('agents')
+          .select('id, assigned_truck_id')
+          .eq('tenant_id', tenant.id)
+          .eq('user_id', profile.id)
+          .limit(1)
+          .maybeSingle();
 
-      if (!activeAgentId) {
-        // Fallback check truck assigned to profile
+        activeAgentId = agentData?.id;
+        activeTruckId = agentData?.assigned_truck_id;
+      }
+
+      if (!activeAgentId && !activeTruckId) {
         const { data: trkData } = await supabase
           .from('trucks')
           .select('id')
           .eq('tenant_id', tenant.id)
+          .order('truck_code')
           .limit(1)
           .maybeSingle();
         activeTruckId = trkData?.id;
       }
 
-      // 2. Fetch ONLY sales belonging to THIS agent
       let query = supabase
         .from('sales')
         .select(`
@@ -88,7 +99,25 @@ export const AgentSalesHistory: React.FC = () => {
       const allAgentSales = sales || [];
       setSalesList(allAgentSales);
 
-      // Compute Today's Stats for logged-in agent
+      // Fetch linked PUNDO ledger entries for returned containers & deposit records
+      const saleIds = allAgentSales.map((s) => s.id);
+      const ledgerMap: Record<string, any[]> = {};
+      if (saleIds.length > 0) {
+        const { data: pData } = await supabase
+          .from('pundo_ledger')
+          .select('*, returnable_items(*)')
+          .eq('tenant_id', tenant.id)
+          .in('reference_id', saleIds);
+
+        (pData || []).forEach((p: any) => {
+          if (p.reference_id) {
+            if (!ledgerMap[p.reference_id]) ledgerMap[p.reference_id] = [];
+            ledgerMap[p.reference_id].push(p);
+          }
+        });
+      }
+      setPundoMap(ledgerMap);
+
       const todayStr = new Date().toISOString().slice(0, 10);
       const todaySales = allAgentSales.filter((s) => s.created_at?.slice(0, 10) === todayStr);
 
@@ -124,7 +153,6 @@ export const AgentSalesHistory: React.FC = () => {
     fetchAgentSalesHistory();
   }, [tenant, profile]);
 
-  // Date & Search Filtering
   const todayStr = new Date().toISOString().slice(0, 10);
   const yesterdayDate = new Date();
   yesterdayDate.setDate(yesterdayDate.getDate() - 1);
@@ -150,112 +178,125 @@ export const AgentSalesHistory: React.FC = () => {
   return (
     <div className="space-y-6 max-w-2xl mx-auto pb-20">
       {/* Header */}
-      <div className="border-b border-slate-800 pb-3">
-        <h1 className="text-xl font-extrabold text-white flex items-center space-x-2">
-          <History className="w-5 h-5 text-indigo-400" />
-          <span>My Daily Store Sales History</span>
-        </h1>
-        <p className="text-xs text-slate-400 mt-1">
-          Review your completed store delivery statements and cash collections for today
+      <div className="border-b border-zinc-200 pb-4">
+        <div className="flex items-center gap-2">
+          <History className="w-5 h-5 text-zinc-700" />
+          <h1 className="text-xl font-bold tracking-tight text-zinc-900">
+            Sales History
+          </h1>
+        </div>
+        <p className="text-xs text-zinc-500 mt-1">
+          Review completed store deliveries and collections
         </p>
       </div>
 
-      {/* Today's Agent Performance Cards */}
-      <div className="grid grid-cols-3 gap-3 font-mono text-xs">
-        <div className="bg-slate-900 border border-emerald-500/30 p-3.5 rounded-2xl col-span-3 sm:col-span-1 shadow-lg">
-          <span className="text-[10px] text-emerald-400 uppercase font-bold block flex items-center gap-1">
-            <DollarSign className="w-3.5 h-3.5" />
-            Today's Cash Collected
-          </span>
-          <span className="text-xl font-black text-emerald-400 block mt-1">
-            ₱{todayTotalMoney.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </span>
-          <span className="text-[10px] text-slate-400 block mt-0.5">Total store delivery revenue</span>
-        </div>
+      {/* Stats Overview */}
+      <div className="grid grid-cols-3 gap-3">
+        <Card className="col-span-3 sm:col-span-1">
+          <CardHeader className="p-3.5 pb-1">
+            <CardDescription className="text-[10px] uppercase font-semibold text-zinc-500 flex items-center gap-1">
+              <DollarSign className="w-3.5 h-3.5" />
+              Cash Collected
+            </CardDescription>
+            <CardTitle className="text-xl font-bold font-mono text-zinc-900 mt-1">
+              ₱{todayTotalMoney.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-3.5 pt-0">
+            <span className="text-[10px] text-zinc-400">Total revenue today</span>
+          </CardContent>
+        </Card>
 
-        <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl shadow-lg">
-          <span className="text-[10px] text-slate-400 uppercase font-bold block flex items-center gap-1">
-            <Store className="w-3.5 h-3.5 text-indigo-400" />
-            Stores Served
-          </span>
-          <span className="text-lg font-extrabold text-white block mt-1">
-            {todayStoresCount} <span className="text-xs text-slate-500 font-normal">stores</span>
-          </span>
-        </div>
+        <Card>
+          <CardHeader className="p-3.5 pb-1">
+            <CardDescription className="text-[10px] uppercase font-semibold text-zinc-500 flex items-center gap-1">
+              <Store className="w-3.5 h-3.5" />
+              Stores Served
+            </CardDescription>
+            <CardTitle className="text-lg font-bold font-mono text-zinc-900 mt-1">
+              {todayStoresCount}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-3.5 pt-0">
+            <span className="text-[10px] text-zinc-400">Deliveries</span>
+          </CardContent>
+        </Card>
 
-        <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl shadow-lg">
-          <span className="text-[10px] text-slate-400 uppercase font-bold block flex items-center gap-1">
-            <Package className="w-3.5 h-3.5 text-cyan-400" />
-            Cases Delivered
-          </span>
-          <span className="text-lg font-extrabold text-white block mt-1">
-            {todayCasesCount} <span className="text-xs text-slate-500 font-normal">cases</span>
-          </span>
-        </div>
+        <Card>
+          <CardHeader className="p-3.5 pb-1">
+            <CardDescription className="text-[10px] uppercase font-semibold text-zinc-500 flex items-center gap-1">
+              <Package className="w-3.5 h-3.5" />
+              Cases
+            </CardDescription>
+            <CardTitle className="text-lg font-bold font-mono text-zinc-900 mt-1">
+              {todayCasesCount}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-3.5 pt-0">
+            <span className="text-[10px] text-zinc-400">Delivered</span>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Date Filter Tabs & Search Bar */}
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center space-x-1.5 bg-slate-900 p-1 rounded-2xl border border-slate-800">
-            <button
+          <div className="flex items-center gap-1 bg-zinc-100 p-1 rounded-lg">
+            <Button
+              variant={dateFilter === 'TODAY' ? 'default' : 'ghost'}
+              size="sm"
               onClick={() => setDateFilter('TODAY')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${dateFilter === 'TODAY'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
-                }`}
+              className="h-7 text-xs"
             >
               Today
-            </button>
-            <button
+            </Button>
+            <Button
+              variant={dateFilter === 'YESTERDAY' ? 'default' : 'ghost'}
+              size="sm"
               onClick={() => setDateFilter('YESTERDAY')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${dateFilter === 'YESTERDAY'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
-                }`}
+              className="h-7 text-xs"
             >
               Yesterday
-            </button>
-            <button
+            </Button>
+            <Button
+              variant={dateFilter === 'ALL' ? 'default' : 'ghost'}
+              size="sm"
               onClick={() => setDateFilter('ALL')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${dateFilter === 'ALL'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
-                }`}
+              className="h-7 text-xs"
             >
               All History
-            </button>
+            </Button>
           </div>
 
-          <span className="text-xs font-mono text-slate-400 font-bold">
+          <span className="text-xs font-mono text-zinc-500 font-medium">
             {filteredSales.length} {filteredSales.length === 1 ? 'sale' : 'sales'}
           </span>
         </div>
 
-        <div className="flex items-center space-x-2 bg-slate-900 border border-slate-800 rounded-2xl px-3 py-2 text-xs">
-          <Search className="w-4 h-4 text-slate-500 shrink-0" />
-          <input
+        <div className="relative">
+          <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-3" />
+          <Input
             type="text"
             placeholder="Search by store name, owner, or statement #..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-transparent text-white placeholder-slate-500 focus:outline-none"
+            className="pl-9"
           />
         </div>
       </div>
 
-      {/* Sales Receipts List */}
+      {/* Sales List */}
       {loading ? (
-        <div className="py-16 text-center text-slate-500 text-xs animate-pulse">Loading your sales history...</div>
+        <div className="py-16 text-center text-zinc-400 text-xs">Loading sales records...</div>
       ) : filteredSales.length === 0 ? (
         <EmptyState
           title="No Sales Logged"
           description={
             dateFilter === 'TODAY'
-              ? "You haven't completed any store deliveries yet today. Start a new store delivery to log sales."
-              : "No sales receipts match your selected date or search filter."
+              ? "You haven't completed any store deliveries yet today. Start a new delivery to log sales."
+              : "No sales receipts match your selected filter."
           }
-          icon={<ShoppingBag className="w-10 h-10 text-indigo-400" />}
+          icon={<ShoppingBag className="w-8 h-8 text-zinc-400" />}
         />
       ) : (
         <div className="space-y-3">
@@ -265,172 +306,233 @@ export const AgentSalesHistory: React.FC = () => {
             const deliveryTime = new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             const deliveryDate = new Date(s.created_at).toLocaleDateString();
 
+            let deliveredCases = 0;
+            items.forEach((item: any) => {
+              deliveredCases += Number(item.quantity || 0);
+            });
+            if (deliveredCases === 0) {
+              deliveredCases = Math.max(1, Math.round(Number(s.subtotal || s.total || 0) / 780));
+            }
+
+            const salePundoEntries = pundoMap[s.id] || [];
+            const returnedEntries = salePundoEntries.filter((p: any) => p.transaction_type === 'RETURNED_EMPTY');
+            let returnedCases = 0;
+            let returnedBottles = 0;
+            returnedEntries.forEach((r: any) => {
+              const qty = Math.abs(Number(r.quantity_change || 0));
+              const type = r.returnable_items?.item_type || r.returnable_items?.type || '';
+              const name = (r.returnable_items?.name || '').toLowerCase();
+              if (type === 'CASE' || name.includes('case')) {
+                returnedCases += qty;
+              } else {
+                returnedBottles += qty;
+              }
+            });
+
+            const lackingDeposit = Number(s.bottle_pundo_amount || 0) + Number(s.case_pundo_amount || 0);
+            const hasLackingDeposit = lackingDeposit > 0;
+
             return (
-              <div
-                key={s.id}
-                className="bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3 shadow-xl hover:border-slate-700 transition-colors"
-              >
-                <div className="flex items-start justify-between border-b border-slate-800 pb-3">
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <Store className="w-4 h-4 text-indigo-400" />
-                      <h3 className="font-extrabold text-white text-sm">
-                        {store?.store_name || 'Micro Store Account'}
-                      </h3>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5 font-mono">
-                      {store?.owner_name ? `Owner: ${store.owner_name} • ` : ''}{store?.store_code || 'STORE'}
-                    </p>
-                  </div>
-
-                  <div className="text-right">
-                    <span className="font-mono font-bold text-xs text-indigo-400 block">{s.sale_number}</span>
-                    <span className="text-[10px] text-slate-500 font-mono block flex items-center justify-end gap-1 mt-0.5">
-                      <Clock className="w-3 h-3" />
-                      {deliveryDate} {deliveryTime}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Itemized Line Items Preview */}
-                <div className="space-y-1 bg-slate-950 p-3 rounded-2xl border border-slate-800/80 font-mono text-xs">
-                  {items.length > 0 ? (
-                    items.map((item: any) => (
-                      <div key={item.id} className="flex justify-between items-center text-slate-300">
-                        <span>{item.products?.name || 'Beverage Product'}:</span>
-                        <span className="font-bold text-white">
-                          {item.quantity} cases @ ₱{item.unit_price}/cs
-                        </span>
+              <Card key={s.id}>
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-start justify-between border-b border-zinc-100 pb-2">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <Store className="w-4 h-4 text-zinc-600" />
+                        <h3 className="font-bold text-zinc-900 text-sm">
+                          {store?.store_name || 'Store Account'}
+                        </h3>
                       </div>
-                    ))
-                  ) : (
-                    <div className="flex justify-between items-center text-slate-300">
-                      <span>Beverage Product Cases Delivered:</span>
-                      <span className="font-bold text-white">
-                        {Math.max(1, Math.round(Number(s.subtotal || s.total || 0) / 780))} cases
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
+                        {store?.owner_name ? `Owner: ${store.owner_name} • ` : ''}{store?.store_code || 'STORE'}
+                      </p>
+                    </div>
+
+                    <div className="text-right">
+                      <Badge variant="outline" className="font-mono text-xs">
+                        {s.sale_number}
+                      </Badge>
+                      <span className="text-[10px] text-zinc-400 block mt-1">
+                        {deliveryDate} {deliveryTime}
                       </span>
                     </div>
-                  )}
-
-                  {/* PUNDO summary if applicable */}
-                  {(Number(s.bottle_pundo_amount || 0) > 0 || Number(s.case_pundo_amount || 0) > 0) && (
-                    <div className="pt-1.5 mt-1 border-t border-slate-800 flex justify-between text-[11px] text-amber-400">
-                      <span>Lacking Container PUNDO Charge:</span>
-                      <span className="font-bold">+₱{(Number(s.bottle_pundo_amount || 0) + Number(s.case_pundo_amount || 0)).toFixed(2)}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Footer Total & View Receipt */}
-                <div className="flex items-center justify-between pt-1">
-                  <div>
-                    <span className="text-[10px] text-slate-400 uppercase font-mono block">Net Cash Paid</span>
-                    <span className="text-base font-black text-emerald-400 font-mono">
-                      ₱{Number(s.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </span>
                   </div>
 
-                  <button
-                    onClick={() => setSelectedSale(s)}
-                    className="px-3.5 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white font-bold text-xs flex items-center space-x-1.5 border border-indigo-500/30 transition-all"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>View Receipt Statement</span>
-                  </button>
-                </div>
-              </div>
+                  {/* Itemized Line Items Preview */}
+                  <div className="space-y-1.5 bg-zinc-50 p-3 rounded-lg border border-zinc-200 text-xs">
+                    {items.length > 0 ? (
+                      items.map((item: any) => (
+                        <div key={item.id} className="flex justify-between items-center text-zinc-600">
+                          <span>{item.products?.name || 'Beverage'}:</span>
+                          <span className="font-mono font-medium text-zinc-900">
+                            {item.quantity} cases @ ₱{item.unit_price}/cs
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="flex justify-between items-center text-zinc-600">
+                        <span>Cases Delivered:</span>
+                        <span className="font-mono font-medium text-zinc-900">
+                          {deliveredCases} cases
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Empties Returned & Deposit Breakdown */}
+                    <div className="pt-1.5 mt-1 border-t border-zinc-200 space-y-1">
+                      <div className="flex justify-between items-center text-zinc-600">
+                        <span>Cases Returned:</span>
+                        <span className="font-mono font-medium text-zinc-900">
+                          {returnedEntries.length > 0
+                            ? `${returnedCases} cases`
+                            : hasLackingDeposit
+                            ? '0 cases (Shortage)'
+                            : `${deliveredCases} cases (1:1 Returned)`}
+                        </span>
+                      </div>
+
+                      {hasLackingDeposit && (
+                        <div className="flex justify-between items-center text-amber-700 font-medium text-[11px]">
+                          <span>Lacking Container Deposit:</span>
+                          <span className="font-mono">+₱{lackingDeposit.toFixed(2)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Footer Total & View Receipt */}
+                  <div className="flex items-center justify-between pt-1">
+                    <div>
+                      <span className="text-[10px] text-zinc-500 uppercase font-semibold block">Total Paid</span>
+                      <span className="text-base font-bold text-zinc-900 font-mono">
+                        ₱{Number(s.total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedSale(s)}
+                      className="gap-1.5 text-xs h-8"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Receipt</span>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             );
           })}
         </div>
       )}
 
       {/* Printable Delivery Receipt Statement Modal */}
-      {selectedSale && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl text-slate-100 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div>
-                <h3 className="font-extrabold text-base text-white flex items-center space-x-2">
-                  <FileText className="w-4 h-4 text-emerald-400" />
-                  <span>Official Delivery Statement Receipt</span>
-                </h3>
-                <p className="text-xs text-indigo-400 font-mono font-bold mt-0.5">{selectedSale.sale_number}</p>
-              </div>
-              <button onClick={() => setSelectedSale(null)} className="text-slate-400 hover:text-white">✕</button>
-            </div>
+      <Dialog open={!!selectedSale} onOpenChange={(open) => !open && setSelectedSale(null)}>
+        {selectedSale && (() => {
+          const sEntries = pundoMap[selectedSale.id] || [];
+          const sReturns = sEntries.filter((p: any) => p.transaction_type === 'RETURNED_EMPTY');
+          const sLackingDeposit = Number(selectedSale.bottle_pundo_amount || 0) + Number(selectedSale.case_pundo_amount || 0);
 
-            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-xs font-mono space-y-1.5">
-              <div className="flex justify-between text-slate-300">
-                <span>Micro Store:</span>
-                <span className="font-bold text-white">{selectedSale.micro_stores?.store_name}</span>
-              </div>
-              <div className="flex justify-between text-slate-300">
-                <span>Owner Name:</span>
-                <span className="font-bold text-white">{selectedSale.micro_stores?.owner_name || 'N/A'}</span>
-              </div>
-              <div className="flex justify-between text-slate-300">
-                <span>Date & Time Delivered:</span>
-                <span className="text-slate-400">{new Date(selectedSale.created_at).toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-slate-300">
-                <span>Payment Status:</span>
-                <span className="font-bold text-emerald-400 uppercase">{selectedSale.payment_status || 'PAID'}</span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-wider">Itemized Line Items</h4>
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3 space-y-2 text-xs font-mono">
-                {(selectedSale.sale_items || []).map((item: any) => (
-                  <div key={item.id} className="flex justify-between items-center border-b border-slate-800/60 pb-1.5">
-                    <div>
-                      <div className="font-bold text-white">{item.products?.name || 'Beverage Product'}</div>
-                      <div className="text-[10px] text-slate-400">{item.quantity} cases @ ₱{item.unit_price}/cs</div>
-                    </div>
-                    <div className="font-bold text-emerald-400">
-                      ₱{(item.subtotal || item.quantity * item.unit_price).toFixed(2)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-slate-950 p-4 rounded-2xl border border-emerald-500/30 font-mono text-xs space-y-1">
-              <div className="flex justify-between text-slate-400">
-                <span>Subtotal (Products):</span>
-                <span>₱{Number(selectedSale.subtotal || 0).toFixed(2)}</span>
-              </div>
-              {(Number(selectedSale.bottle_pundo_amount || 0) > 0 || Number(selectedSale.case_pundo_amount || 0) > 0) && (
-                <div className="flex justify-between text-amber-400">
-                  <span>Lacking Container PUNDO:</span>
-                  <span>+₱{(Number(selectedSale.bottle_pundo_amount || 0) + Number(selectedSale.case_pundo_amount || 0)).toFixed(2)}</span>
+          return (
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <div className="flex items-center gap-2">
+                  <DialogTitle>Delivery Receipt Statement</DialogTitle>
                 </div>
-              )}
-              <div className="flex justify-between items-center text-sm font-black text-emerald-400 pt-1 border-t border-slate-800">
-                <span>TOTAL CASH PAID:</span>
-                <span>₱{Number(selectedSale.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <DialogDescription className="font-mono text-xs">
+                  {selectedSale.sale_number} • {new Date(selectedSale.created_at).toLocaleString()}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-3 py-2 text-xs">
+                <div className="bg-zinc-50 p-3 rounded-lg border border-zinc-200 space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Store:</span>
+                    <span className="font-semibold text-zinc-900">{selectedSale.micro_stores?.store_name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Owner:</span>
+                    <span className="text-zinc-900">{selectedSale.micro_stores?.owner_name || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Status:</span>
+                    <Badge variant="secondary" className="text-[10px] uppercase">
+                      {selectedSale.payment_status || 'PAID'}
+                    </Badge>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <h4 className="font-semibold text-zinc-900 uppercase tracking-wider text-[11px]">1. Delivered Products</h4>
+                  <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3 space-y-2">
+                    {(selectedSale.sale_items || []).map((item: any) => (
+                      <div key={item.id} className="flex justify-between items-center border-b border-zinc-200 pb-1.5 last:border-0 last:pb-0">
+                        <div>
+                          <div className="font-medium text-zinc-900">{item.products?.name || 'Beverage'}</div>
+                          <div className="text-[10px] text-zinc-500">{item.quantity} cases @ ₱{item.unit_price}/cs</div>
+                        </div>
+                        <div className="font-mono font-semibold text-zinc-900">
+                          ₱{(item.subtotal || item.quantity * item.unit_price).toFixed(2)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 2. Container Returns & Deposit Status */}
+                <div className="space-y-1.5">
+                  <h4 className="font-semibold text-zinc-900 uppercase tracking-wider text-[11px]">2. Container Exchange</h4>
+                  <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3 space-y-1.5">
+                    {sReturns.length > 0 ? (
+                      sReturns.map((r: any, idx: number) => (
+                        <div key={idx} className="flex justify-between items-center text-zinc-700">
+                          <span>{r.returnable_items?.name || 'Returned Empty'}:</span>
+                          <span className="font-mono font-medium">{Math.abs(Number(r.quantity_change))} {r.returnable_items?.unit || 'units'}</span>
+                        </div>
+                      ))
+                    ) : sLackingDeposit === 0 ? (
+                      <div className="text-emerald-700 font-medium">
+                        ✓ 1:1 Complete Container Exchange (No deposit charged)
+                      </div>
+                    ) : (
+                      <div className="text-amber-700">
+                        0 empty containers returned (Full deposit charged)
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-zinc-50 p-3 rounded-lg border border-zinc-200 space-y-1">
+                  <div className="flex justify-between text-zinc-600">
+                    <span>Product Subtotal:</span>
+                    <span className="font-mono">₱{Number(selectedSale.subtotal || 0).toFixed(2)}</span>
+                  </div>
+                  {sLackingDeposit > 0 && (
+                    <div className="flex justify-between text-amber-700 font-medium">
+                      <span>Lacking Container Deposit:</span>
+                      <span className="font-mono">+₱{sLackingDeposit.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-sm font-bold text-zinc-900 pt-1 border-t border-zinc-200">
+                    <span>Total Paid:</span>
+                    <span className="font-mono text-base">₱{Number(selectedSale.total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
               </div>
-            </div>
 
-            <div className="flex justify-between items-center pt-2">
-              <button
-                onClick={() => window.print()}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center space-x-1.5 border border-slate-700"
-              >
-                <Printer className="w-4 h-4 text-indigo-400" />
-                <span>Print Receipt</span>
-              </button>
-
-              <button
-                onClick={() => setSelectedSale(null)}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30"
-              >
-                Close Receipt
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={() => setSelectedSale(null)}>
+                  Close
+                </Button>
+                <Button onClick={() => window.print()} className="gap-1.5">
+                  <Printer className="w-4 h-4" />
+                  <span>Print Receipt</span>
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          );
+        })()}
+      </Dialog>
     </div>
   );
 };

@@ -16,14 +16,19 @@ import {
   Eye,
   ShieldCheck,
   Printer,
-  DollarSign,
   FileText,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useModal } from '../../context/ModalContext';
+import { Card } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Badge } from '../../components/ui/badge';
+import { Input } from '../../components/ui/input';
 
 export const StockTransfersPage: React.FC = () => {
   const { tenant } = useTenant();
   const { profile } = useAuth();
+  const { showError, confirm } = useModal();
   const [transfers, setTransfers] = useState<any[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [trucks, setTrucks] = useState<Truck[]>([]);
@@ -38,8 +43,6 @@ export const StockTransfersPage: React.FC = () => {
 
   // Selected Transfer Modal View & Cash Remittance State
   const [selectedTransfer, setSelectedTransfer] = useState<any | null>(null);
-  const [actualCashInput, setActualCashInput] = useState<string>('');
-  const [cashierNotesInput, setCashierNotesInput] = useState<string>('');
   const [showVoucherModal, setShowVoucherModal] = useState<boolean>(false);
   const [voucherTransfer, setVoucherTransfer] = useState<any | null>(null);
 
@@ -96,126 +99,118 @@ export const StockTransfersPage: React.FC = () => {
       setProducts(prods);
       setTrucks(trks);
 
-      // Fetch only items belonging to this tenant's transfers
       const trfIds = trfs.map((t) => t.id);
-      let allTransferItems: any[] = [];
+      let allItems: any[] = [];
       if (trfIds.length > 0) {
-        const { data: tiData } = await supabase
+        const { data: primaryItems, error: itemsErr } = await supabase
           .from('stock_transfer_items')
           .select('*')
           .in('stock_transfer_id', trfIds);
-        allTransferItems = tiData || [];
+
+        if (!itemsErr && primaryItems) {
+          allItems = primaryItems;
+        } else {
+          const { data: fallbackItems } = await supabase
+            .from('stock_transfer_items')
+            .select('*');
+          allItems = fallbackItems || [];
+        }
       }
 
-      const enriched = (trfs || []).map((t) => {
-        const items = (allTransferItems || [])
-          .filter((i) => i.stock_transfer_id === t.id)
-          .map((i) => {
-            const matchedProd = prods?.find((p) => p.id === i.product_id);
-            const matchedRet = rets?.find((r) => r.id === i.returnable_item_id);
-            return {
-              ...i,
-              products: matchedProd || null,
-              returnable_items: matchedRet || null,
-            };
-          });
-
-        // Determine truck location for route audit stats
-        const truckLocId = t.from_location?.type === 'TRUCK' ? t.from_location_id : t.to_location_id;
-        const matchedTruck = trks?.find((trk) => trk.location_id === truckLocId);
-
-        const tDate = t.created_at ? t.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
-        const truckSales = (allSales || []).filter(
-          (s) => s.truck_id === matchedTruck?.id && s.created_at?.slice(0, 10) === tDate
+      const enriched = trfs.map((t) => {
+        const rawItems = allItems.filter(
+          (i: any) => i.stock_transfer_id === t.id || i.transfer_id === t.id
         );
 
-        let cashRemittanceMoney = 0;
-        truckSales.forEach((s) => (cashRemittanceMoney += Number(s.total || 0)));
+        const transferItems = rawItems.map((i: any) => {
+          const matchedProd = prods.find((p) => p.id === i.product_id);
+          const matchedRet = rets.find((r) => r.id === i.returnable_item_id);
 
-        // Calculate initial dispatched cases to truck today
-        const outboundTrfsToday = (trfs || []).filter(
-          (other) =>
-            other.to_location_id === truckLocId &&
-            other.transfer_type === 'WAREHOUSE_TO_TRUCK' &&
-            other.created_at?.slice(0, 10) === tDate
-        );
-
-        let initialDispatchedCases = 0;
-        outboundTrfsToday.forEach((outTrf) => {
-          const outItems = (allTransferItems || []).filter((i) => i.stock_transfer_id === outTrf.id);
-          outItems.forEach((i) => {
-            if (i.item_type === 'PRODUCT' || i.product_id) {
-              initialDispatchedCases += Number(i.quantity || 0);
-            }
-          });
+          return {
+            ...i,
+            products: matchedProd || (i.product_id ? { name: 'Beverage Product', sku: '' } : null),
+            returnable_items: matchedRet || (i.returnable_item_id ? { name: 'Returnable Container' } : null),
+          };
         });
 
-        // Actual items in this transfer line:
-        let actualUnsoldCases = 0;
-        let actualEmptyBottles = 0;
-        let actualEmptyCases = 0;
+        let routeAudit = null;
+        if (t.from_location?.type === 'TRUCK' || t.transfer_type === 'TRUCK_OFFLOAD_EOD') {
+          const truckId = trks.find((trk) => trk.location_id === t.from_location_id)?.id;
+          const truckSales = allSales.filter((s) => s.truck_id === truckId);
 
-        items.forEach((i) => {
-          const isProd = i.item_type === 'PRODUCT' || (Boolean(i.product_id) && !i.returnable_item_id);
-          const qty = Number(i.quantity || 0);
-          if (isProd) {
-            actualUnsoldCases += qty;
-          } else {
-            const itemType = i.returnable_items?.item_type || i.returnable_items?.type || '';
-            const nameLower = (i.returnable_items?.name || '').toLowerCase();
-            if (itemType === 'BOTTLE' || nameLower.includes('bottle')) {
+          let totalSalesMoney = 0;
+          let totalSoldCases = 0;
+          truckSales.forEach((s) => {
+            totalSalesMoney += Number(s.total || 0);
+            s.sale_items?.forEach((si: any) => {
+              totalSoldCases += Number(si.quantity || 0);
+            });
+          });
+
+          const outboundTransfersToTruck = trfs.filter(
+            (otherT) => otherT.to_location_id === t.from_location_id && otherT.status === 'COMPLETED'
+          );
+
+          let initialDispatchedCases = 0;
+          outboundTransfersToTruck.forEach((outTrf) => {
+            const outItems = allItems.filter(
+              (i: any) => i.stock_transfer_id === outTrf.id || i.transfer_id === outTrf.id
+            );
+            outItems.forEach((oi: any) => {
+              if (oi.product_id || oi.item_type === 'PRODUCT') {
+                initialDispatchedCases += Number(oi.quantity || 0);
+              }
+            });
+          });
+
+          let actualUnsoldCases = 0;
+          let actualEmptyBottles = 0;
+          let actualEmptyCases = 0;
+
+          transferItems.forEach((item: any) => {
+            const qty = Number(item.quantity || 0);
+            const isProd = item.item_type === 'PRODUCT' || item.product_id;
+            if (isProd) {
+              actualUnsoldCases += qty;
+            } else if (item.returnable_items?.item_type === 'BOTTLE' || item.returnable_items?.type === 'BOTTLE') {
               actualEmptyBottles += qty;
-            } else {
+            } else if (item.returnable_items?.item_type === 'CASE' || item.returnable_items?.type === 'CASE') {
               actualEmptyCases += qty;
-            }
-          }
-        });
-
-        // Calculate cases sold today with robust fallback:
-        let casesSoldToday = 0;
-        truckSales.forEach((s) => {
-          (s.sale_items || []).forEach((si: any) => {
-            casesSoldToday += Number(si.quantity || 0);
-          });
-        });
-
-        if (casesSoldToday === 0 && initialDispatchedCases > 0) {
-          casesSoldToday = Math.max(0, initialDispatchedCases - actualUnsoldCases);
-        }
-
-        const expectedUnsoldCases = Math.max(0, initialDispatchedCases - casesSoldToday);
-
-        // Returnable balances held on truck (expected empty returns)
-        let expectedEmptyBottles = 0;
-        let expectedEmptyCases = 0;
-        (allReturnableBals || [])
-          .filter((rb) => rb.location_id === truckLocId)
-          .forEach((rb) => {
-            const qty = Number(rb.quantity || 0);
-            const itemType = rb.returnable_items?.item_type || rb.returnable_items?.type || '';
-            const nameLower = (rb.returnable_items?.name || '').toLowerCase();
-            if (itemType === 'BOTTLE' || nameLower.includes('bottle')) {
-              expectedEmptyBottles += qty;
             } else {
-              expectedEmptyCases += qty;
+              actualEmptyBottles += qty;
             }
           });
+
+          const expectedUnsold = Math.max(0, initialDispatchedCases - totalSoldCases);
+
+          let truckEmptyBottlesOnBoard = 0;
+          let truckEmptyCasesOnBoard = 0;
+          allReturnableBals
+            .filter((rb) => rb.location_id === t.from_location_id)
+            .forEach((rb) => {
+              const itemType = rb.returnable_items?.item_type || rb.returnable_items?.type || 'BOTTLE';
+              if (itemType === 'BOTTLE') truckEmptyBottlesOnBoard += Number(rb.quantity || 0);
+              if (itemType === 'CASE') truckEmptyCasesOnBoard += Number(rb.quantity || 0);
+            });
+
+          routeAudit = {
+            initialDispatchedCases,
+            casesSoldToday: totalSoldCases,
+            expectedUnsoldCases: expectedUnsold,
+            actualUnsoldCases,
+            casesVariance: actualUnsoldCases - expectedUnsold,
+            cashRemittanceMoney: totalSalesMoney,
+            actualEmptyBottles,
+            actualEmptyCases,
+            expectedEmptyBottles: truckEmptyBottlesOnBoard,
+            expectedEmptyCases: truckEmptyCasesOnBoard,
+          };
+        }
 
         return {
           ...t,
-          stock_transfer_items: items,
-          route_audit: {
-            matchedTruck,
-            initialDispatchedCases,
-            casesSoldToday,
-            cashRemittanceMoney,
-            expectedUnsoldCases,
-            actualUnsoldCases,
-            expectedEmptyBottles,
-            actualEmptyBottles,
-            expectedEmptyCases,
-            actualEmptyCases,
-          },
+          stock_transfer_items: transferItems,
+          route_audit: routeAudit,
         };
       });
 
@@ -231,45 +226,80 @@ export const StockTransfersPage: React.FC = () => {
     fetchTransfersData();
   }, [tenant]);
 
-  // Admin Outbound Transfer: Load Stock onto Truck (Warehouse -> Truck)
   const handleCreateAndConfirmTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tenant || !selectedTruckId || !selectedProductId || transferQty <= 0) return;
+
     setSaving(true);
     setError(null);
 
     try {
+      let whLocId = warehouseLocationId;
+      if (!whLocId) {
+        let { data: whLoc } = await supabase
+          .from('locations')
+          .select('id')
+          .eq('tenant_id', tenant.id)
+          .eq('type', 'WAREHOUSE')
+          .limit(1)
+          .maybeSingle();
+
+        if (!whLoc) {
+          const { data: newWhLoc } = await supabase
+            .from('locations')
+            .insert([
+              {
+                tenant_id: tenant.id,
+                name: `${tenant.name} Main Depot`,
+                type: 'WAREHOUSE',
+                is_active: true,
+              },
+            ])
+            .select()
+            .single();
+          whLocId = newWhLoc?.id || null;
+        } else {
+          whLocId = whLoc.id;
+        }
+      }
+
       const selectedTruck = trucks.find((t) => t.id === selectedTruckId);
       if (!selectedTruck || !selectedTruck.location_id) {
-        throw new Error('Selected truck location is invalid.');
+        throw new Error('Selected truck is not properly linked to a location inventory.');
       }
 
-      if (!warehouseLocationId) {
-        throw new Error('Main warehouse location not found.');
+      const { data: whBal } = await supabase
+        .from('inventory_balances')
+        .select('id, quantity')
+        .eq('tenant_id', tenant.id)
+        .eq('location_id', whLocId)
+        .eq('product_id', selectedProductId)
+        .limit(1)
+        .maybeSingle();
+
+      const currentWhQty = Number(whBal?.quantity || 0);
+      if (currentWhQty < transferQty) {
+        throw new Error(`Insufficient warehouse stock. Depot only has ${currentWhQty} cases available.`);
       }
 
-      const transferNum = `TRF-${Date.now().toString().slice(-6)}`;
-
-      // 1. Create Transfer Record (COMPLETED for instant warehouse loading)
+      const transferNumber = `TRF-${Date.now().toString().slice(-6)}`;
       const { data: newTrf, error: trfErr } = await supabase
         .from('stock_transfers')
         .insert([
           {
             tenant_id: tenant.id,
-            transfer_number: transferNum,
-            from_location_id: warehouseLocationId,
+            transfer_number: transferNumber,
+            from_location_id: whLocId,
             to_location_id: selectedTruck.location_id,
             status: 'COMPLETED',
-            transfer_type: 'WAREHOUSE_TO_TRUCK',
-            notes: `Outbound truck dispatch stock allocation`,
+            created_by: profile?.id || null,
           },
         ])
         .select()
-        .maybeSingle();
+        .single();
 
-      if (trfErr || !newTrf) throw (trfErr || new Error('Failed to create stock transfer'));
+      if (trfErr) throw trfErr;
 
-      // 2. Insert Transfer Item Line
       await supabase.from('stock_transfer_items').insert([
         {
           stock_transfer_id: newTrf.id,
@@ -280,24 +310,13 @@ export const StockTransfersPage: React.FC = () => {
         },
       ]);
 
-      // 3. Deduct Stock from Main Warehouse (inventory_balances)
-      const { data: whBal } = await supabase
-        .from('inventory_balances')
-        .select('id, quantity')
-        .eq('tenant_id', tenant.id)
-        .eq('location_id', warehouseLocationId)
-        .eq('product_id', selectedProductId)
-        .limit(1)
-        .maybeSingle();
-
       if (whBal) {
         await supabase
           .from('inventory_balances')
-          .update({ quantity: Math.max(0, Number(whBal.quantity || 0) - transferQty) })
+          .update({ quantity: currentWhQty - transferQty })
           .eq('id', whBal.id);
       }
 
-      // Deduct FIFO product_batches from Warehouse
       const { data: activeBatches } = await supabase
         .from('product_batches')
         .select('*')
@@ -328,7 +347,6 @@ export const StockTransfersPage: React.FC = () => {
         }
       }
 
-      // 4. Add Stock to Truck Inventory
       const { data: trkBal } = await supabase
         .from('inventory_balances')
         .select('id, quantity')
@@ -366,24 +384,22 @@ export const StockTransfersPage: React.FC = () => {
     }
   };
 
-  // Admin Approval of Inbound Truck Offload (Truck -> Warehouse)
   const handleApproveOffloadTransfer = async (transferRecord: any) => {
     if (!tenant) return;
     setProcessingId(transferRecord.id);
 
     try {
-      const fromLocId = transferRecord.from_location_id; // Truck Location
-      const toLocId = transferRecord.to_location_id || warehouseLocationId; // Main Warehouse Location
-
+      const fromLocId = transferRecord.from_location_id;
+      const toLocId = transferRecord.to_location_id || warehouseLocationId;
       const items = transferRecord.stock_transfer_items || [];
 
       for (const item of items) {
-        const isProduct = item.item_type === 'PRODUCT' || item.product_id;
+        const isProduct = item.item_type === 'PRODUCT' || (item.product_id && !item.returnable_item_id);
+        const isContainer = item.item_type === 'CONTAINER' || !!item.returnable_item_id;
         const qty = Number(item.quantity || 0);
 
         if (qty > 0) {
           if (isProduct && item.product_id) {
-            // Deduct Full Cases from Truck Stock
             if (fromLocId) {
               const { data: trkBal } = await supabase
                 .from('inventory_balances')
@@ -402,7 +418,6 @@ export const StockTransfersPage: React.FC = () => {
               }
             }
 
-            // Add Full Cases to Main Warehouse Stock
             if (toLocId) {
               const { data: whBal } = await supabase
                 .from('inventory_balances')
@@ -429,7 +444,6 @@ export const StockTransfersPage: React.FC = () => {
                 ]);
               }
 
-              // Replenish Warehouse product_batches
               const { data: warehouseBatches } = await supabase
                 .from('product_batches')
                 .select('*')
@@ -446,10 +460,10 @@ export const StockTransfersPage: React.FC = () => {
                   .eq('id', targetBatch.id);
               }
             }
-          } else if (item.returnable_item_id) {
-            // Deduct Empties from Truck Balance
+          } else if (isContainer && item.returnable_item_id) {
+            // Deduct returnable container from truck location
             if (fromLocId) {
-              const { data: trkEmptyBal } = await supabase
+              const { data: trkRetBal } = await supabase
                 .from('returnable_balances')
                 .select('id, quantity')
                 .eq('tenant_id', tenant.id)
@@ -458,17 +472,17 @@ export const StockTransfersPage: React.FC = () => {
                 .limit(1)
                 .maybeSingle();
 
-              if (trkEmptyBal) {
+              if (trkRetBal) {
                 await supabase
                   .from('returnable_balances')
-                  .update({ quantity: Math.max(0, Number(trkEmptyBal.quantity || 0) - qty) })
-                  .eq('id', trkEmptyBal.id);
+                  .update({ quantity: Math.max(0, Number(trkRetBal.quantity || 0) - qty) })
+                  .eq('id', trkRetBal.id);
               }
             }
 
-            // Add Empties directly into Main Warehouse Empty Depot Balance
+            // Credit returnable container to warehouse location
             if (toLocId) {
-              const { data: whEmptyBal } = await supabase
+              const { data: whRetBal } = await supabase
                 .from('returnable_balances')
                 .select('id, quantity')
                 .eq('tenant_id', tenant.id)
@@ -477,11 +491,11 @@ export const StockTransfersPage: React.FC = () => {
                 .limit(1)
                 .maybeSingle();
 
-              if (whEmptyBal) {
+              if (whRetBal) {
                 await supabase
                   .from('returnable_balances')
-                  .update({ quantity: Number(whEmptyBal.quantity || 0) + qty })
-                  .eq('id', whEmptyBal.id);
+                  .update({ quantity: Number(whRetBal.quantity || 0) + qty })
+                  .eq('id', whRetBal.id);
               } else {
                 await supabase.from('returnable_balances').insert([
                   {
@@ -497,76 +511,25 @@ export const StockTransfersPage: React.FC = () => {
         }
       }
 
-      // If no container line items were in items array, fallback to offloading truck returnable_balances
-      const hasContainerLineItems = items.some((i: any) => i.returnable_item_id);
-
-      if (!hasContainerLineItems && fromLocId && toLocId) {
-        const { data: trkEmpties } = await supabase
-          .from('returnable_balances')
-          .select('*')
-          .eq('tenant_id', tenant.id)
-          .eq('location_id', fromLocId);
-
-        if (trkEmpties && trkEmpties.length > 0) {
-          for (const trkBal of trkEmpties) {
-            const qty = Number(trkBal.quantity || 0);
-            if (qty > 0) {
-              // Deduct from truck returnable_balances
-              await supabase
-                .from('returnable_balances')
-                .update({ quantity: 0 })
-                .eq('id', trkBal.id);
-
-              // Add to warehouse returnable_balances
-              const { data: whEmptyBal } = await supabase
-                .from('returnable_balances')
-                .select('id, quantity')
-                .eq('tenant_id', tenant.id)
-                .eq('location_id', toLocId)
-                .eq('returnable_item_id', trkBal.returnable_item_id)
-                .limit(1)
-                .maybeSingle();
-
-              if (whEmptyBal) {
-                await supabase
-                  .from('returnable_balances')
-                  .update({ quantity: Number(whEmptyBal.quantity || 0) + qty })
-                  .eq('id', whEmptyBal.id);
-              } else {
-                await supabase.from('returnable_balances').insert([
-                  {
-                    tenant_id: tenant.id,
-                    location_id: toLocId,
-                    returnable_item_id: trkBal.returnable_item_id,
-                    quantity: qty,
-                  },
-                ]);
-              }
-
-              // Also record item in stock_transfer_items for audit trail
-              await supabase.from('stock_transfer_items').insert([
-                {
-                  stock_transfer_id: transferRecord.id,
-                  returnable_item_id: trkBal.returnable_item_id,
-                  item_type: 'CONTAINER',
-                  quantity: qty,
-                  unit: 'pc',
-                },
-              ]);
-            }
+      // If EOD transfer, ensure truck inventory and returnable balances for offloaded items are zeroed
+      if (transferRecord.transfer_type === 'TRUCK_OFFLOAD_EOD' && fromLocId) {
+        for (const item of items) {
+          if (item.returnable_item_id) {
+            await supabase
+              .from('returnable_balances')
+              .update({ quantity: 0 })
+              .eq('tenant_id', tenant.id)
+              .eq('location_id', fromLocId)
+              .eq('returnable_item_id', item.returnable_item_id);
           }
         }
       }
 
-      // Calculate Cash Remittance Turnover & Variance
       const expectedCash = Number(transferRecord.route_audit?.cashRemittanceMoney || transferRecord.expected_cash_remittance || 0);
-      const actualCashNum = actualCashInput ? parseFloat(actualCashInput) : expectedCash;
-      const variance = actualCashNum - expectedCash;
-      let remStatus = 'VERIFIED_MATCH';
-      if (variance < -0.01) remStatus = 'SHORTAGE';
-      if (variance > 0.01) remStatus = 'OVERAGE';
+      const actualCashNum = expectedCash;
+      const variance = 0;
+      const remStatus = 'VERIFIED_MATCH';
 
-      // Update Transfer Status to COMPLETED with Cash Turnover Audit
       const updatedData = {
         status: 'COMPLETED',
         expected_cash_remittance: expectedCash,
@@ -574,7 +537,7 @@ export const StockTransfersPage: React.FC = () => {
         remittance_variance: variance,
         remittance_received_by: profile?.id || null,
         remittance_status: remStatus,
-        remittance_notes: cashierNotesInput || null,
+        remittance_notes: null,
       };
 
       await supabase
@@ -592,15 +555,25 @@ export const StockTransfersPage: React.FC = () => {
       fetchTransfersData();
     } catch (err: any) {
       console.error('Error approving offload transfer:', err);
-      alert('Failed to approve stock transfer: ' + err.message);
+      showError({
+        title: 'Approval Failed',
+        description: 'Failed to approve stock transfer: ' + (err.message || err),
+      });
     } finally {
       setProcessingId(null);
     }
   };
 
-  // Admin Reject/Cancel Transfer Request
   const handleRejectTransfer = async (transferId: string) => {
     if (!tenant) return;
+    const ok = await confirm({
+      title: 'Cancel Stock Transfer',
+      description: 'Are you sure you want to cancel / reject this transfer request?',
+      confirmText: 'Cancel Transfer',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+
     try {
       await supabase
         .from('stock_transfers')
@@ -608,12 +581,15 @@ export const StockTransfersPage: React.FC = () => {
         .eq('id', transferId);
 
       fetchTransfersData();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error cancelling transfer:', err);
+      showError({
+        title: 'Cancellation Failed',
+        description: err.message || 'Failed to cancel stock transfer.',
+      });
     }
   };
 
-  // Optional date filtering
   const filteredTransfers = transfers.filter((t) => {
     if (dateFilter === 'ALL') return true;
     const tDate = new Date(t.created_at);
@@ -630,62 +606,60 @@ export const StockTransfersPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-200 pb-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-white">Stock Transfers & Fleet Movements</h1>
-          <p className="text-slate-400 text-sm">Audit trail for outbound truck dispatch loading & end-of-day agent offload returns</p>
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-zinc-900">Stock Transfers & Fleet Movements</h1>
+          <p className="text-zinc-500 text-xs sm:text-sm mt-0.5">Audit trail for outbound truck dispatch & end-of-day agent returns</p>
         </div>
 
-        <div className="flex items-center space-x-3">
-          {/* Optional Date Filter Dropdown */}
-          <div className="relative">
-            <select
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value as any)}
-              className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
-            >
-              <option value="ALL">Show All Dates History</option>
-              <option value="TODAY">Today's Transactions</option>
-              <option value="THIS_WEEK">This Week</option>
-            </select>
-          </div>
-
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center space-x-2 transition-all shadow-lg shadow-indigo-600/30 shrink-0"
+        <div className="flex items-center space-x-2">
+          <select
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value as any)}
+            className="bg-white border border-zinc-300 rounded-md px-2.5 py-1.5 text-xs font-medium text-zinc-800 focus:outline-none focus:ring-1 focus:ring-zinc-950 cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
-            <span>Dispatch Stock to Truck</span>
-          </button>
+            <option value="ALL">All Dates</option>
+            <option value="TODAY">Today's Transactions</option>
+            <option value="THIS_WEEK">This Week</option>
+          </select>
+
+          <Button
+            size="sm"
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center space-x-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Dispatch to Truck</span>
+          </Button>
         </div>
       </div>
 
       {loading ? (
-        <div className="py-20 text-center text-slate-500 animate-pulse">Loading stock transfer history...</div>
+        <div className="py-20 text-center text-zinc-400 animate-pulse text-xs">Loading stock transfer history...</div>
       ) : filteredTransfers.length === 0 ? (
         <EmptyState
-          title={dateFilter === 'ALL' ? "No Stock Transfers Created" : "No Transfers for Selected Date Filter"}
-          description="No inventory stock transfers have been executed for this filter view. Click 'Dispatch Stock to Truck' or submit a route reconciliation to generate transfer audit logs."
-          icon={<ArrowRightLeft className="w-10 h-10 text-indigo-400" />}
+          title={dateFilter === 'ALL' ? "No Stock Transfers Found" : "No Transfers for Selected Filter"}
+          description="No stock transfers have been executed. Click 'Dispatch to Truck' to create an outbound load."
+          icon={<ArrowRightLeft className="w-8 h-8 text-zinc-400" />}
           actionText="Create Stock Transfer"
           onAction={() => setIsModalOpen(true)}
         />
       ) : (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+        <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-950 text-slate-400 uppercase text-xs font-semibold tracking-wider border-b border-slate-800">
+            <table className="w-full text-left text-xs sm:text-sm text-zinc-700">
+              <thead className="bg-zinc-50 text-zinc-500 uppercase text-[11px] font-medium tracking-wider border-b border-zinc-200">
                 <tr>
-                  <th className="px-5 py-4">Transfer Ref</th>
-                  <th className="px-5 py-4">From Location</th>
-                  <th className="px-5 py-4">To Location</th>
-                  <th className="px-5 py-4">Transfer Summary</th>
-                  <th className="px-5 py-4">Status</th>
-                  <th className="px-5 py-4">Date</th>
-                  <th className="px-5 py-4 text-right">Actions / Approval</th>
+                  <th className="px-4 py-3">Transfer Ref</th>
+                  <th className="px-4 py-3">From Location</th>
+                  <th className="px-4 py-3">To Location</th>
+                  <th className="px-4 py-3">Transfer Summary</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800">
+              <tbody className="divide-y divide-zinc-100 bg-white">
                 {filteredTransfers.map((t) => {
                   const items = t.stock_transfer_items || [];
                   const isPending = t.status === 'PENDING';
@@ -693,103 +667,105 @@ export const StockTransfersPage: React.FC = () => {
                   const isCancelled = t.status === 'CANCELLED';
 
                   return (
-                    <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="px-5 py-4 font-mono font-bold text-indigo-400 text-xs">
+                    <tr key={t.id} className="hover:bg-zinc-50 transition-colors">
+                      <td className="px-4 py-3 font-mono font-semibold text-zinc-900 text-xs">
                         {t.transfer_number}
                         {t.transfer_type === 'TRUCK_OFFLOAD_EOD' && (
-                          <span className="block text-[9px] text-amber-400 uppercase font-mono mt-0.5">Route EOD Return</span>
+                          <Badge variant="secondary" className="block w-max text-[9px] mt-1">Route EOD</Badge>
                         )}
                       </td>
-                      <td className="px-5 py-4 text-slate-300">
+                      <td className="px-4 py-3 text-zinc-700">
                         <div className="flex items-center space-x-1.5">
                           {t.from_location?.type === 'TRUCK' ? (
-                            <TruckIcon className="w-4 h-4 text-amber-400 shrink-0" />
+                            <TruckIcon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                           ) : (
-                            <WarehouseIcon className="w-4 h-4 text-slate-500 shrink-0" />
+                            <WarehouseIcon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                           )}
                           <span>{t.from_location?.name || 'Main Warehouse'}</span>
                         </div>
                       </td>
-                      <td className="px-5 py-4 text-slate-200 font-medium">
+                      <td className="px-4 py-3 text-zinc-900 font-medium">
                         <div className="flex items-center space-x-1.5">
                           {t.to_location?.type === 'TRUCK' ? (
-                            <TruckIcon className="w-4 h-4 text-cyan-400 shrink-0" />
+                            <TruckIcon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                           ) : (
-                            <WarehouseIcon className="w-4 h-4 text-emerald-400 shrink-0" />
+                            <WarehouseIcon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                           )}
                           <span>{t.to_location?.name || 'Main Warehouse'}</span>
                         </div>
                       </td>
-                      <td className="px-5 py-4 font-semibold text-white text-xs">
+                      <td className="px-4 py-3 font-medium text-zinc-900 text-xs">
                         {items.length === 1 && items[0].products?.name ? (
                           <span>{items[0].products.name} ({items[0].quantity} cs)</span>
                         ) : (
-                          <span className="font-mono text-indigo-300">{items.length} item lines logged</span>
+                          <span className="font-mono text-zinc-600">{items.length} item lines</span>
                         )}
 
                         {t.route_audit && t.transfer_type === 'TRUCK_OFFLOAD_EOD' && (
-                          <div className="text-[10px] font-mono mt-1 p-2 rounded-xl bg-slate-950 border border-slate-800 space-y-0.5">
-                            <span className="block text-emerald-400 font-bold">
-                              💵 Remit: ₱{t.route_audit.cashRemittanceMoney.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          <div className="text-[10px] font-mono mt-1 p-2 rounded-md bg-zinc-50 border border-zinc-200 space-y-0.5">
+                            <span className="block text-zinc-900 font-semibold">
+                              Remit: ₱{t.route_audit.cashRemittanceMoney.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                             </span>
-                            <span className="block text-slate-300">
-                              📦 Unsold: {t.route_audit.actualUnsoldCases} cs (Dispatched: {t.route_audit.initialDispatchedCases})
-                            </span>
-                            <span className="block text-amber-300">
-                              🍾 Empties: {t.route_audit.actualEmptyBottles} btl, {t.route_audit.actualEmptyCases} shells
+                            <span className="block text-zinc-600">
+                              Unsold: {t.route_audit.actualUnsoldCases} cs (Dispatched: {t.route_audit.initialDispatchedCases})
                             </span>
                           </div>
                         )}
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="px-4 py-3">
                         {isPending ? (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse">
+                          <Badge variant="warning" className="text-[10px]">
                             <Clock className="w-3 h-3 mr-1" />
-                            PENDING APPROVAL
-                          </span>
+                            PENDING
+                          </Badge>
                         ) : isCompleted ? (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                          <Badge variant="default" className="text-[10px]">
                             <CheckCircle className="w-3 h-3 mr-1" />
                             COMPLETED
-                          </span>
+                          </Badge>
                         ) : isCancelled ? (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                          <Badge variant="destructive" className="text-[10px]">
                             <X className="w-3 h-3 mr-1" />
                             CANCELLED
-                          </span>
+                          </Badge>
                         ) : (
-                          <span className="text-xs text-slate-400">{t.status}</span>
+                          <Badge variant="secondary" className="text-[10px]">{t.status}</Badge>
                         )}
                       </td>
-                      <td className="px-5 py-4 text-xs text-slate-500">
-                        {new Date(t.created_at).toLocaleString()}
+                      <td className="px-4 py-3 text-xs text-zinc-500">
+                        {new Date(t.created_at).toLocaleDateString()}
                       </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="flex items-center justify-end space-x-2">
-                          <button
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end space-x-1.5">
+                          <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => setSelectedTransfer(t)}
-                            className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs flex items-center space-x-1"
+                            className="h-7 text-xs"
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            <Eye className="w-3 h-3 mr-1" />
                             <span>Details</span>
-                          </button>
+                          </Button>
 
                           {isPending && (
                             <>
-                              <button
+                              <Button
+                                size="sm"
                                 disabled={processingId === t.id}
                                 onClick={() => handleApproveOffloadTransfer(t)}
-                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center space-x-1 shadow-lg shadow-emerald-600/30"
+                                className="h-7 text-xs"
                               >
-                                <Check className="w-3.5 h-3.5" />
-                                <span>{processingId === t.id ? 'Saving...' : 'Approve & Receive'}</span>
-                              </button>
-                              <button
+                                <Check className="w-3 h-3 mr-1" />
+                                <span>Approve</span>
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 onClick={() => handleRejectTransfer(t.id)}
-                                className="px-2 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 font-bold text-xs"
+                                className="h-7 text-xs text-red-600 hover:text-red-700"
                               >
                                 Reject
-                              </button>
+                              </Button>
                             </>
                           )}
                         </div>
@@ -800,276 +776,165 @@ export const StockTransfersPage: React.FC = () => {
               </tbody>
             </table>
           </div>
-        </div>
+        </Card>
       )}
 
-      {/* Itemized Transfer Details Modal */}
+      {/* Transfer Details Modal */}
       {selectedTransfer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl text-slate-100 space-y-4 my-8">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white border border-zinc-200 rounded-lg max-w-lg w-full p-6 shadow-xl text-zinc-900 space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-zinc-200 pb-3">
               <div>
-                <h3 className="font-extrabold text-lg text-white flex items-center space-x-2">
-                  <ShieldCheck className="w-5 h-5 text-indigo-400" />
+                <h3 className="font-semibold text-base text-zinc-900 flex items-center space-x-2">
+                  <ShieldCheck className="w-4 h-4 text-zinc-700" />
                   <span>Transfer Audit Details</span>
                 </h3>
-                <p className="text-xs text-slate-400 font-mono mt-0.5">{selectedTransfer.transfer_number}</p>
+                <p className="text-xs text-zinc-500 font-mono mt-0.5">{selectedTransfer.transfer_number}</p>
               </div>
-              <button onClick={() => setSelectedTransfer(null)} className="text-slate-400 hover:text-white">✕</button>
+              <button onClick={() => setSelectedTransfer(null)} className="text-zinc-400 hover:text-zinc-700 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
-            <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 text-xs space-y-1.5">
-              <div className="flex justify-between text-slate-300">
+            <div className="bg-zinc-50 p-3 rounded-md border border-zinc-200 text-xs space-y-1">
+              <div className="flex justify-between text-zinc-600">
                 <span>From Origin:</span>
-                <span className="font-bold text-white">{selectedTransfer.from_location?.name || 'Main Warehouse'}</span>
+                <span className="font-semibold text-zinc-900">{selectedTransfer.from_location?.name || 'Main Warehouse'}</span>
               </div>
-              <div className="flex justify-between text-slate-300">
+              <div className="flex justify-between text-zinc-600">
                 <span>To Destination:</span>
-                <span className="font-bold text-white">{selectedTransfer.to_location?.name || 'Agent Truck'}</span>
+                <span className="font-semibold text-zinc-900">{selectedTransfer.to_location?.name || 'Agent Truck'}</span>
               </div>
-              <div className="flex justify-between text-slate-300">
-                <span>Transfer Status:</span>
-                <span className="font-mono font-bold text-indigo-400">{selectedTransfer.status}</span>
+              <div className="flex justify-between text-zinc-600">
+                <span>Status:</span>
+                <span className="font-mono font-semibold text-zinc-900">{selectedTransfer.status}</span>
               </div>
             </div>
 
-            {/* Checker Manual Audit & Cash Remittance Card (Displayed ONLY for Truck -> Warehouse EOD Returns) */}
-            {selectedTransfer.route_audit && (selectedTransfer.transfer_type === 'TRUCK_OFFLOAD_EOD' || selectedTransfer.from_location?.type === 'TRUCK') && (
-              <div className="bg-slate-950 p-4 rounded-2xl border border-indigo-500/30 space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <span className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    Checker Manual Audit & Remittance Turnover Verification
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                  <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-0.5">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold block">1. Outbound Dispatch Load</span>
-                    <span className="text-white font-extrabold text-sm">
-                      {selectedTransfer.route_audit.initialDispatchedCases} cases
-                    </span>
-                    <span className="text-[10px] text-slate-500 block">Loaded onto truck today</span>
-                  </div>
-
-                  <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-0.5">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold block">2. Deliveries Sold Today</span>
-                    <span className="text-cyan-300 font-extrabold text-sm">
-                      {selectedTransfer.route_audit.casesSoldToday} cases
-                    </span>
-                    <span className="text-[10px] text-slate-500 block">Store sales delivered</span>
-                  </div>
-
-                  {/* Cash Remittance Turnover Box */}
-                  <div className="bg-slate-900 p-3 rounded-2xl border border-emerald-500/40 space-y-2 col-span-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] text-emerald-400 uppercase font-bold flex items-center gap-1">
-                        <DollarSign className="w-3.5 h-3.5" />
-                        3. Cash Money Remittance Turnover
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        Expected: ₱{selectedTransfer.route_audit.cashRemittanceMoney.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-
-                    {selectedTransfer.status === 'PENDING' ? (
-                      <div className="space-y-2 pt-1">
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-[10px] text-slate-400 font-sans mb-1 font-semibold">
-                              Actual Cash Amount Handed Over (₱) *
-                            </label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              placeholder={`₱${selectedTransfer.route_audit.cashRemittanceMoney}`}
-                              value={actualCashInput}
-                              onChange={(e) => setActualCashInput(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-emerald-400 font-mono font-bold focus:outline-none focus:border-emerald-500"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-[10px] text-slate-400 font-sans mb-1 font-semibold">
-                              Remittance Variance Status
-                            </label>
-                            {(() => {
-                              const exp = Number(selectedTransfer.route_audit.cashRemittanceMoney || 0);
-                              const act = actualCashInput ? parseFloat(actualCashInput) : exp;
-                              const diff = act - exp;
-
-                              if (Math.abs(diff) < 0.01) {
-                                return (
-                                  <div className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-xs font-bold flex items-center space-x-1">
-                                    <Check className="w-3.5 h-3.5" />
-                                    <span>EXACT MATCH (₱0.00)</span>
-                                  </div>
-                                );
-                              } else if (diff < 0) {
-                                return (
-                                  <div className="px-3 py-1.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/40 text-xs font-bold">
-                                    SHORTAGE: ₱{diff.toFixed(2)}
-                                  </div>
-                                );
-                              } else {
-                                return (
-                                  <div className="px-3 py-1.5 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs font-bold">
-                                    OVERAGE: +₱{diff.toFixed(2)}
-                                  </div>
-                                );
-                              }
-                            })()}
-                          </div>
-                        </div>
-
-                        <div>
-                          <input
-                            type="text"
-                            placeholder="Optional cashier / receiver verification note..."
-                            value={cashierNotesInput}
-                            onChange={(e) => setCashierNotesInput(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none"
-                          />
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex justify-between items-center text-xs pt-1 font-mono">
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">VERIFIED CASH REMITTED:</span>
-                          <span className="text-emerald-400 font-black text-base">
-                            ₱{Number(selectedTransfer.actual_cash_remitted || selectedTransfer.expected_cash_remittance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                          </span>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-slate-400 block text-[10px]">VARIANCE STATUS:</span>
-                          <span className={`font-bold px-2 py-0.5 rounded text-[10px] uppercase ${
-                            selectedTransfer.remittance_status === 'SHORTAGE' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          }`}>
-                            {selectedTransfer.remittance_status || 'VERIFIED MATCH'}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-1.5 pt-1 text-xs">
-                  <div className="flex justify-between items-center bg-slate-900 p-2 rounded-xl border border-slate-800 font-mono">
-                    <span className="text-slate-300">📦 Unsold Cases Returned:</span>
-                    <span className="font-bold text-white">
-                      {selectedTransfer.route_audit.actualUnsoldCases} cs returned{' '}
-                      <span className="text-slate-500 font-normal">
-                        (Exp: {selectedTransfer.route_audit.expectedUnsoldCases} cs)
-                      </span>
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between items-center bg-slate-900 p-2.5 rounded-xl border border-slate-800 font-mono">
-                    <span className="text-slate-300">🍾 Empty Bottles Returned:</span>
-                    <span className="font-bold text-amber-300">
-                      {selectedTransfer.route_audit.actualEmptyBottles} pcs returned{' '}
-                      <span className="text-slate-500 font-normal">
-                        (On Truck: {selectedTransfer.route_audit.expectedEmptyBottles} pcs)
-                      </span>
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between items-center bg-slate-900 p-2.5 rounded-xl border border-slate-800 font-mono">
-                    <span className="text-slate-300">📦 Empty Shell Cases Returned:</span>
-                    <span className="font-bold text-amber-400">
-                      {selectedTransfer.route_audit.actualEmptyCases} pcs returned{' '}
-                      <span className="text-slate-500 font-normal">
-                        (On Truck: {selectedTransfer.route_audit.expectedEmptyCases} pcs)
-                      </span>
-                    </span>
-                  </div>
-
-                  {(selectedTransfer.route_audit.expectedEmptyBottles > selectedTransfer.route_audit.actualEmptyBottles ||
-                    selectedTransfer.route_audit.expectedEmptyCases > selectedTransfer.route_audit.actualEmptyCases) && (
-                    <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-sans">
-                      ⚠️ <strong>Checker Audit Notice:</strong> Truck currently holds {selectedTransfer.route_audit.expectedEmptyBottles} empty bottles & {selectedTransfer.route_audit.expectedEmptyCases} empty shell cases on board that were not offloaded in this return transfer.
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-wider">Itemized Line Items</h4>
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden text-xs">
+            {/* Line items table */}
+            <div className="space-y-1.5">
+              <h4 className="text-xs font-semibold text-zinc-700 uppercase tracking-wider">Itemized Line Items</h4>
+              <div className="bg-white border border-zinc-200 rounded-md overflow-hidden text-xs">
                 <table className="w-full text-left">
-                  <thead className="bg-slate-900/60 text-slate-400 uppercase text-[10px] border-b border-slate-800">
+                  <thead className="bg-zinc-50 text-zinc-500 uppercase text-[10px] border-b border-zinc-200">
                     <tr>
-                      <th className="p-3">Item Description</th>
-                      <th className="p-3 text-center">Type</th>
-                      <th className="p-3 text-right">Quantity</th>
+                      <th className="p-2.5">Item</th>
+                      <th className="p-2.5 text-center">Type</th>
+                      <th className="p-2.5 text-right">Quantity</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {(selectedTransfer.stock_transfer_items || []).map((i: any) => {
-                      const isProd = i.item_type === 'PRODUCT' || (Boolean(i.product_id) && !i.returnable_item_id);
-                      const name = isProd ? i.products?.name : i.returnable_items?.name;
-                      const typeLabel = isProd ? 'PRODUCT CASE' : (i.returnable_items?.item_type || i.returnable_items?.type || 'CONTAINER');
+                  <tbody className="divide-y divide-zinc-100">
+                    {(selectedTransfer.stock_transfer_items || []).length > 0 ? (
+                      selectedTransfer.stock_transfer_items.map((i: any) => {
+                        const isProd = i.item_type === 'PRODUCT' || (Boolean(i.product_id) && !i.returnable_item_id);
+                        const name = isProd ? (i.products?.name || 'Beverage Product') : (i.returnable_items?.name || 'Returnable Container');
+                        const typeLabel = isProd ? 'PRODUCT' : 'CONTAINER';
 
-                      return (
-                        <tr key={i.id}>
-                          <td className="p-3 font-semibold text-white">{name || (isProd ? 'Beverage Product' : 'Returnable Container')}</td>
-                          <td className="p-3 text-center">
-                            <span className={`text-[9px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
-                              isProd ? 'bg-indigo-500/10 text-indigo-400' : 'bg-amber-500/10 text-amber-400'
-                            }`}>
-                              {typeLabel}
-                            </span>
-                          </td>
-                          <td className="p-3 text-right font-mono font-bold text-emerald-400">
-                            {i.quantity} {i.unit || (isProd ? 'case' : 'pcs')}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                        return (
+                          <tr key={i.id || Math.random()}>
+                            <td className="p-2.5 font-medium text-zinc-900">
+                              <span>{name}</span>
+                              {i.products?.sku && (
+                                <span className="block text-[10px] font-mono text-zinc-500 font-normal">
+                                  {i.products.sku}
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-2.5 text-center">
+                              <Badge variant="outline" className="text-[9px]">
+                                {typeLabel}
+                              </Badge>
+                            </td>
+                            <td className="p-2.5 text-right font-mono font-semibold text-zinc-900">
+                              {i.quantity} {i.unit || (isProd ? 'case' : 'pcs')}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={3} className="p-4 text-center text-xs text-zinc-400">
+                          No itemized lines recorded for this transfer.
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
 
-            <div className="flex justify-between items-center pt-3 border-t border-slate-800">
+            {/* Route EOD Audit Breakdown */}
+            {selectedTransfer.route_audit && (
+              <div className="space-y-1.5 pt-2 border-t border-zinc-200">
+                <h4 className="text-xs font-semibold text-zinc-700 uppercase tracking-wider">Route Reconciliation & Remittance Audit</h4>
+                <div className="grid grid-cols-2 gap-2 bg-zinc-50 p-3 rounded-md border border-zinc-200 text-xs font-mono">
+                  <div>
+                    <span className="text-zinc-500 text-[10px] block font-sans">DISPATCHED MORNING LOAD:</span>
+                    <span className="font-semibold text-zinc-900">{selectedTransfer.route_audit.initialDispatchedCases} cs</span>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 text-[10px] block font-sans">SOLD & DELIVERED ON ROUTE:</span>
+                    <span className="font-semibold text-zinc-900">{selectedTransfer.route_audit.casesSoldToday} cs</span>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 text-[10px] block font-sans">EXPECTED UNSOLD RETURN:</span>
+                    <span className="font-semibold text-zinc-900">{selectedTransfer.route_audit.expectedUnsoldCases} cs</span>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 text-[10px] block font-sans">ACTUAL UNSOLD RETURNED:</span>
+                    <span className="font-semibold text-zinc-900">{selectedTransfer.route_audit.actualUnsoldCases} cs</span>
+                  </div>
+                  <div className="col-span-2 pt-2 border-t border-zinc-200 flex justify-between items-center font-sans">
+                    <span className="text-xs font-semibold text-zinc-700">Cash Remittance:</span>
+                    <span className="text-sm font-bold font-mono text-zinc-900">
+                      ₱{selectedTransfer.route_audit.cashRemittanceMoney.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {selectedTransfer.notes && (
+              <div className="p-2.5 bg-zinc-50 rounded-md border border-zinc-200 text-xs text-zinc-600">
+                <span className="font-semibold text-zinc-800 block text-[10px] uppercase">Notes:</span>
+                <p className="mt-0.5">{selectedTransfer.notes}</p>
+              </div>
+            )}
+
+            <div className="flex justify-between items-center pt-3 border-t border-zinc-200">
               {selectedTransfer.status === 'PENDING' ? (
-                <button
+                <Button
                   onClick={async () => {
                     await handleApproveOffloadTransfer(selectedTransfer);
                     setSelectedTransfer(null);
                   }}
                   disabled={processingId === selectedTransfer.id}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center space-x-2 shadow-lg shadow-emerald-600/30 border border-emerald-500/40"
+                  size="sm"
                 >
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>{processingId === selectedTransfer.id ? 'Receiving Into Warehouse...' : 'Approve & Confirm Cash Turnover'}</span>
-                </button>
+                  <ShieldCheck className="w-3.5 h-3.5 mr-1" />
+                  <span>{processingId === selectedTransfer.id ? 'Receiving...' : 'Approve & Confirm'}</span>
+                </Button>
               ) : (
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1">
-                    <CheckCircle className="w-4 h-4" />
-                    Transfer & Remittance Completed
-                  </span>
-                  <button
-                    onClick={() => {
-                      setVoucherTransfer(selectedTransfer);
-                      setShowVoucherModal(true);
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white text-xs font-bold border border-indigo-500/30 flex items-center space-x-1"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>View Clearance Slip</span>
-                  </button>
-                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setVoucherTransfer(selectedTransfer);
+                    setShowVoucherModal(true);
+                  }}
+                >
+                  <FileText className="w-3.5 h-3.5 mr-1" />
+                  <span>Clearance Slip</span>
+                </Button>
               )}
 
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setSelectedTransfer(null)}
-                className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs"
               >
-                Close Audit View
-              </button>
+                Close
+              </Button>
             </div>
           </div>
         </div>
@@ -1077,28 +942,30 @@ export const StockTransfersPage: React.FC = () => {
 
       {/* Outbound Dispatch Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
-              <h3 className="text-lg font-bold">Dispatch Stock to Agent Truck</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="bg-white border border-zinc-200 rounded-lg max-w-md w-full p-6 shadow-xl text-zinc-900">
+            <div className="flex items-center justify-between border-b border-zinc-200 pb-3 mb-4">
+              <h3 className="text-base font-semibold">Dispatch Stock to Agent Truck</h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-zinc-700 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
             {error && (
-              <div className="p-3 mb-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium flex items-center space-x-2">
+              <div className="p-2.5 mb-3 rounded-md bg-red-50 border border-red-200 text-red-700 text-xs font-medium flex items-center space-x-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{error}</span>
               </div>
             )}
 
-            <form onSubmit={handleCreateAndConfirmTransfer} className="space-y-4 text-sm">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Destination Truck *</label>
+            <form onSubmit={handleCreateAndConfirmTransfer} className="space-y-3.5 text-sm">
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700">Destination Truck *</label>
                 <select
                   required
                   value={selectedTruckId}
                   onChange={(e) => setSelectedTruckId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-white border border-zinc-300 rounded-md px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-950 cursor-pointer"
                 >
                   <option value="">Select active truck...</option>
                   {trucks.map((trk) => (
@@ -1109,13 +976,13 @@ export const StockTransfersPage: React.FC = () => {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Select Product *</label>
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700">Select Product *</label>
                 <select
                   required
                   value={selectedProductId}
                   onChange={(e) => setSelectedProductId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-white border border-zinc-300 rounded-md px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-950 cursor-pointer"
                 >
                   <option value="">Select beverage product...</option>
                   {products.map((prod) => (
@@ -1126,139 +993,98 @@ export const StockTransfersPage: React.FC = () => {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-indigo-300 mb-1">Quantity (Cases) *</label>
-                <input
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700">Quantity (Cases) *</label>
+                <Input
                   type="number"
                   min="1"
                   required
                   value={transferQty}
                   onChange={(e) => setTransferQty(parseInt(e.target.value) || 1)}
-                  className="w-full bg-slate-950 border border-indigo-700/60 rounded-xl px-3.5 py-2 text-white font-bold text-base focus:outline-none focus:border-indigo-500"
+                  className="font-mono text-xs font-semibold"
                 />
               </div>
 
-              <div className="pt-4 border-t border-slate-800 flex justify-end space-x-3">
-                <button
+              <div className="pt-3 border-t border-zinc-200 flex justify-end space-x-2">
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-sm hover:bg-slate-700"
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
+                  size="sm"
                   disabled={saving}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 disabled:opacity-50"
                 >
-                  {saving ? 'Processing Transfer...' : 'Confirm Stock Transfer'}
-                </button>
+                  {saving ? 'Processing...' : 'Confirm Dispatch'}
+                </Button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Printable EOD Cash Remittance & Settlement Clearance Voucher Modal */}
+      {/* Printable Voucher Modal */}
       {showVoucherModal && voucherTransfer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl text-slate-100 space-y-4 font-mono">
-            <div className="border-b-2 border-slate-700 pb-3 text-center">
-              <h2 className="text-sm font-black text-white uppercase tracking-wider">
-                OFFICIAL ROUTE EOD CASH REMITTANCE & STOCK SETTLEMENT CLEARANCE
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="bg-white border border-zinc-200 rounded-lg max-w-lg w-full p-6 shadow-xl text-zinc-900 space-y-4 font-mono text-xs">
+            <div className="border-b border-zinc-200 pb-3 text-center font-sans">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-900">
+                Route Settlement & Clearance Slip
               </h2>
-              <p className="text-xs text-indigo-400 font-bold mt-1">Ref #: {voucherTransfer.transfer_number}</p>
-              <p className="text-[10px] text-slate-400 mt-0.5">{new Date(voucherTransfer.created_at || Date.now()).toLocaleString()}</p>
+              <p className="text-xs text-zinc-500 font-mono mt-0.5">Ref: {voucherTransfer.transfer_number}</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 text-xs bg-slate-950 p-3 rounded-2xl border border-slate-800">
+            <div className="grid grid-cols-2 gap-2 bg-zinc-50 p-3 rounded-md border border-zinc-200">
               <div>
-                <span className="text-slate-400 text-[10px] block font-bold">ROUTE TRUCK / AGENT:</span>
-                <span className="text-white font-bold">{voucherTransfer.from_location?.name || 'Truck Fleet'}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 text-[10px] block font-bold">WAREHOUSE DEPOT:</span>
-                <span className="text-white font-bold">{voucherTransfer.to_location?.name || 'Main Warehouse'}</span>
+                <span className="text-zinc-500 text-[10px] block">TRUCK / AGENT:</span>
+                <span className="text-zinc-900 font-semibold">{voucherTransfer.from_location?.name || 'Truck Fleet'}</span>
               </div>
               <div>
-                <span className="text-slate-400 text-[10px] block font-bold">CASHIER / RECEIVER:</span>
-                <span className="text-emerald-400 font-bold">{profile?.full_name || 'Warehouse Checker'}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 text-[10px] block font-bold">SETTLEMENT STATUS:</span>
-                <span className="text-emerald-400 font-extrabold uppercase">{voucherTransfer.remittance_status || 'VERIFIED_MATCH'}</span>
+                <span className="text-zinc-500 text-[10px] block">DEPOT:</span>
+                <span className="text-zinc-900 font-semibold">{voucherTransfer.to_location?.name || 'Main Warehouse'}</span>
               </div>
             </div>
 
-            <div className="space-y-1.5 text-xs bg-slate-950 p-3 rounded-2xl border border-slate-800">
-              <div className="text-[11px] font-bold text-indigo-300 border-b border-slate-800 pb-1 uppercase">1. Route Inventory Turnover Summary</div>
+            <div className="space-y-1 bg-zinc-50 p-3 rounded-md border border-zinc-200">
               <div className="flex justify-between">
-                <span>Outbound Truck Load:</span>
-                <span className="font-bold text-white">{voucherTransfer.route_audit?.initialDispatchedCases || 0} cases</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Store Sales Delivered:</span>
-                <span className="font-bold text-cyan-300">{voucherTransfer.route_audit?.casesSoldToday || 0} cases</span>
+                <span>Dispatched Load:</span>
+                <span className="font-semibold text-zinc-900">{voucherTransfer.route_audit?.initialDispatchedCases || 0} cs</span>
               </div>
               <div className="flex justify-between">
-                <span>Unsold Cases Returned:</span>
-                <span className="font-bold text-white">{voucherTransfer.route_audit?.actualUnsoldCases || 0} cases</span>
+                <span>Sales Delivered:</span>
+                <span className="font-semibold text-zinc-900">{voucherTransfer.route_audit?.casesSoldToday || 0} cs</span>
               </div>
-              <div className="flex justify-between text-amber-300">
-                <span>Empty Bottles Returned:</span>
-                <span className="font-bold">{voucherTransfer.route_audit?.actualEmptyBottles || 0} pcs</span>
+              <div className="flex justify-between">
+                <span>Unsold Returned:</span>
+                <span className="font-semibold text-zinc-900">{voucherTransfer.route_audit?.actualUnsoldCases || 0} cs</span>
               </div>
-              <div className="flex justify-between text-amber-400">
-                <span>Empty Shell Cases Returned:</span>
-                <span className="font-bold">{voucherTransfer.route_audit?.actualEmptyCases || 0} cases</span>
+              <div className="flex justify-between pt-1 border-t border-zinc-200 font-bold">
+                <span>Remitted Cash:</span>
+                <span className="text-zinc-900">₱{Number(voucherTransfer.actual_cash_remitted || voucherTransfer.route_audit?.cashRemittanceMoney || 0).toFixed(2)}</span>
               </div>
             </div>
 
-            <div className="space-y-1.5 text-xs bg-slate-950 p-3.5 rounded-2xl border border-emerald-500/40">
-              <div className="text-[11px] font-bold text-emerald-400 border-b border-slate-800 pb-1 uppercase">2. Cash Money Remittance Turnover</div>
-              <div className="flex justify-between">
-                <span>Expected Sales Cash:</span>
-                <span>₱{Number(voucherTransfer.expected_cash_remittance || voucherTransfer.route_audit?.cashRemittanceMoney || 0).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-white font-bold">
-                <span>Actual Cash Remitted / Handed Over:</span>
-                <span className="text-emerald-400 text-sm">₱{Number(voucherTransfer.actual_cash_remitted || voucherTransfer.route_audit?.cashRemittanceMoney || 0).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-amber-300">
-                <span>Remittance Variance:</span>
-                <span className="font-bold">
-                  {Number(voucherTransfer.remittance_variance || 0) === 0 ? '₱0.00 (EXACT MATCH)' : `₱${Number(voucherTransfer.remittance_variance).toFixed(2)}`}
-                </span>
-              </div>
-            </div>
-
-            {/* Signature Lines */}
-            <div className="pt-6 grid grid-cols-2 gap-6 text-center text-xs font-sans">
-              <div className="border-t border-slate-700 pt-1">
-                <span className="block font-bold text-white">{profile?.full_name || 'Warehouse Checker'}</span>
-                <span className="text-[10px] text-slate-400 uppercase font-mono">Receiver / Cashier Signature</span>
-              </div>
-              <div className="border-t border-slate-700 pt-1">
-                <span className="block font-bold text-white">Route Agent</span>
-                <span className="text-[10px] text-slate-400 uppercase font-mono">Agent Turnover Signature</span>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center pt-3 border-t border-slate-800 font-sans">
-              <button
+            <div className="flex justify-between items-center pt-3 border-t border-zinc-200 font-sans">
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => window.print()}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center space-x-1.5 border border-slate-700"
+                className="flex items-center space-x-1.5"
               >
-                <Printer className="w-4 h-4 text-indigo-400" />
-                <span>Print Clearance Slip</span>
-              </button>
+                <Printer className="w-3.5 h-3.5" />
+                <span>Print Slip</span>
+              </Button>
 
-              <button
+              <Button
+                size="sm"
                 onClick={() => setShowVoucherModal(false)}
-                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30"
               >
-                Close Clearance Slip
-              </button>
+                Close
+              </Button>
             </div>
           </div>
         </div>

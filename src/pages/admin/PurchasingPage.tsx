@@ -2,13 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
+import { useModal } from '../../context/ModalContext';
 import type { Supplier, Product, Warehouse } from '../../types/database.types';
 import { EmptyState } from '../../components/EmptyState';
-import { Plus, PackageCheck, FileText, Eye, Printer, ShieldCheck } from 'lucide-react';
+import { Plus, PackageCheck, FileText, Eye, Printer, ShieldCheck, X } from 'lucide-react';
+import { Card } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
 
 export const PurchasingPage: React.FC = () => {
   const { tenant } = useTenant();
   const { profile } = useAuth();
+  const { showError, showSuccess } = useModal();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [stockInReceipts, setStockInReceipts] = useState<any[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -103,24 +108,35 @@ export const PurchasingPage: React.FC = () => {
   const handleCreateSupplier = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tenant || !supName) return;
+
     setSaving(true);
     try {
-      await supabase.from('suppliers').insert([
+      const { error: sErr } = await supabase.from('suppliers').insert([
         {
           tenant_id: tenant.id,
           name: supName.trim(),
-          contact_person: contactPerson,
-          phone,
+          contact_person: contactPerson.trim() || null,
+          phone: phone.trim() || null,
           is_active: true,
         },
       ]);
+
+      if (sErr) throw sErr;
+
       setIsSupModalOpen(false);
       setSupName('');
       setContactPerson('');
       setPhone('');
       fetchData();
+      showSuccess({
+        title: 'Supplier Added',
+        description: `Supplier "${supName.trim()}" has been created successfully.`,
+      });
     } catch (err: any) {
-      setError(err.message);
+      showError({
+        title: 'Supplier Creation Failed',
+        description: err.message || 'Failed to create supplier.',
+      });
     } finally {
       setSaving(false);
     }
@@ -128,83 +144,83 @@ export const PurchasingPage: React.FC = () => {
 
   const handleConfirmStockIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !selectedProdId || qtyCases <= 0 || !expDate) return;
+    if (!tenant || !selectedProdId || !batchNum || !expDate || qtyCases <= 0) return;
 
     setSaving(true);
     setError(null);
 
     try {
-      // 1. Generate Unique Stock In Control Number
-      const controlNum = `STK-IN-${Date.now().toString().slice(-6)}`;
-      const selectedSup = suppliers.find((s) => s.id === selectedSupId);
+      const controlNumber = `CTRL-${Date.now().toString().slice(-6)}`;
       const totalAmount = qtyCases * unitCost;
 
-      // 2. Create Stock In Receipt Record
-      const { data: newStIn, error: stInErr } = await supabase
+      const targetWh = warehouses[0]?.id || null;
+      const supplierObj = suppliers.find((s) => s.id === selectedSupId);
+
+      const { data: newReceipt, error: rErr } = await supabase
         .from('stock_in_receipts')
         .insert([
           {
             tenant_id: tenant.id,
-            control_number: controlNum,
+            control_number: controlNumber,
+            reference_number: refNumber.trim() || null,
             supplier_id: selectedSupId || null,
-            supplier_name: selectedSup?.name || 'Direct Supplier',
-            reference_number: refNumber || `REF-${Date.now().toString().slice(-6)}`,
-            total_cases: qtyCases,
+            supplier_name: supplierObj?.name || 'Direct Supplier',
+            warehouse_id: targetWh,
+            total_cases: Number(qtyCases),
             total_amount: totalAmount,
-            notes,
             received_by: profile?.id || null,
+            notes: notes.trim() || null,
+            status: 'RECEIVED',
           },
         ])
         .select()
-        .maybeSingle();
+        .single();
 
-      if (!stInErr && newStIn) {
-        // Insert item line
-        await supabase.from('stock_in_items').insert([
-          {
-            stock_in_receipt_id: newStIn.id,
-            product_id: selectedProdId,
-            batch_number: batchNum.toUpperCase().trim(),
-            manufacture_date: mfgDate || null,
-            expiry_date: expDate,
-            quantity_cases: qtyCases,
-            unit_price: unitCost,
-            subtotal: totalAmount,
-          },
-        ]);
-      } else {
-        // Fallback insert to purchase_receipts if stock_in_receipts table pending
-        const mainWh = warehouses[0];
-        const { data: oldRcpt } = await supabase
+      if (rErr) {
+        const { data: legacyReceipt, error: legErr } = await supabase
           .from('purchase_receipts')
           .insert([
             {
               tenant_id: tenant.id,
+              receipt_number: controlNumber,
+              reference_number: refNumber.trim() || null,
               supplier_id: selectedSupId || null,
-              warehouse_id: mainWh?.id || null,
-              reference_number: controlNum,
-              status: 'CONFIRMED',
-              created_by: profile?.id || null,
+              warehouse_id: targetWh,
+              total_amount: totalAmount,
+              status: 'RECEIVED',
+              received_date: new Date().toISOString().split('T')[0],
             },
           ])
           .select()
           .single();
 
-        if (oldRcpt) {
+        if (legErr) throw legErr;
+
+        if (legacyReceipt) {
           await supabase.from('purchase_receipt_items').insert([
             {
-              purchase_receipt_id: oldRcpt.id,
+              receipt_id: legacyReceipt.id,
               product_id: selectedProdId,
-              quantity: qtyCases,
-              unit: 'case',
+              quantity_cases: qtyCases,
               unit_cost: unitCost,
               total_cost: totalAmount,
             },
           ]);
         }
+      } else if (newReceipt) {
+        await supabase.from('stock_in_items').insert([
+          {
+            stock_in_id: newReceipt.id,
+            product_id: selectedProdId,
+            batch_number: batchNum.toUpperCase().trim(),
+            expiry_date: expDate,
+            quantity_cases: qtyCases,
+            unit_price: unitCost,
+            total_price: totalAmount,
+          },
+        ]);
       }
 
-      // 3. Create FIFO Batch Lot for Warehouse
       await supabase.from('product_batches').insert([
         {
           tenant_id: tenant.id,
@@ -219,7 +235,6 @@ export const PurchasingPage: React.FC = () => {
         },
       ]);
 
-      // 4. Update Main Warehouse Inventory Balance
       let whLocId = warehouses[0]?.location_id;
       if (!whLocId) {
         const { data: whLoc } = await supabase
@@ -277,67 +292,70 @@ export const PurchasingPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-200 pb-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-white flex items-center space-x-2">
-            <PackageCheck className="w-6 h-6 text-indigo-400" />
-            <span>Stock In & Warehouse Receiving Management</span>
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-zinc-900 flex items-center space-x-2">
+            <PackageCheck className="w-5 h-5 text-zinc-800" />
+            <span>Stock In & Warehouse Receiving</span>
           </h1>
-          <p className="text-slate-400 text-sm">
+          <p className="text-zinc-500 text-xs sm:text-sm mt-0.5">
             Record batch stock-in transactions, generate Control Numbers & receive supplier deliveries
           </p>
         </div>
 
-        <div className="flex items-center space-x-3">
-          <button
+        <div className="flex items-center space-x-2">
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setIsSupModalOpen(true)}
-            className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center space-x-2 transition-all"
+            className="flex items-center space-x-1.5"
           >
-            <Plus className="w-4 h-4 text-indigo-400" />
+            <Plus className="w-3.5 h-3.5" />
             <span>Add Supplier</span>
-          </button>
-          <button
+          </Button>
+          <Button
+            size="sm"
             onClick={openStockInModal}
-            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center space-x-2 transition-all shadow-lg shadow-emerald-600/30"
+            className="flex items-center space-x-1.5"
           >
-            <Plus className="w-4 h-4" />
-            <span>+ New Stock In Receiving</span>
-          </button>
+            <Plus className="w-3.5 h-3.5" />
+            <span>New Stock In</span>
+          </Button>
         </div>
       </div>
 
-      <div className="space-y-4">
-        <h2 className="text-base font-extrabold text-white flex items-center space-x-2">
-          <FileText className="w-5 h-5 text-indigo-400" />
-          <span>Stock In Control Receipts Ledger ({stockInReceipts.length})</span>
+      <div className="space-y-3">
+        <h2 className="text-sm font-semibold text-zinc-900 flex items-center space-x-2">
+          <FileText className="w-4 h-4 text-zinc-600" />
+          <span>Control Receipts Ledger ({stockInReceipts.length})</span>
         </h2>
 
         {loading ? (
-          <div className="py-12 text-center text-slate-500 animate-pulse">Loading Stock In control receipts...</div>
+          <div className="py-12 text-center text-zinc-400 animate-pulse text-xs">Loading Stock In control receipts...</div>
         ) : stockInReceipts.length === 0 ? (
           <EmptyState
             title="No Stock In Receipts Logged"
-            description="No stock receiving records found. Click '+ New Stock In Receiving' to log supplier deliveries with unique Control Numbers."
+            description="No stock receiving records found. Click 'New Stock In' to log supplier deliveries with unique Control Numbers."
             actionText="New Stock In Receiving"
             onAction={openStockInModal}
           />
         ) : (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+          <Card className="overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm text-slate-300">
-                <thead className="bg-slate-950 text-slate-400 uppercase text-xs font-semibold tracking-wider border-b border-slate-800">
+              <table className="w-full text-left text-xs sm:text-sm text-zinc-700">
+                <thead className="bg-zinc-50 text-zinc-500 uppercase text-[11px] font-medium tracking-wider border-b border-zinc-200">
                   <tr>
-                    <th className="px-6 py-4">Control Number</th>
-                    <th className="px-6 py-4">Supplier</th>
-                    <th className="px-6 py-4">Invoice / Ref #</th>
-                    <th className="px-6 py-4">Received Items & Quantity</th>
-                    <th className="px-6 py-4 text-right">Valuation Amount</th>
-                    <th className="px-6 py-4">Date Logged</th>
-                    <th className="px-6 py-4 text-right">Receipt Voucher</th>
+                    <th className="px-4 py-3">Control #</th>
+                    <th className="px-4 py-3">Supplier</th>
+                    <th className="px-4 py-3">Invoice / Ref #</th>
+                    <th className="px-4 py-3">Received Items & Quantity</th>
+                    <th className="px-4 py-3 text-right">Valuation Amount</th>
+                    <th className="px-4 py-3">Date Logged</th>
+                    <th className="px-4 py-3 text-right">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800">
+                <tbody className="divide-y divide-zinc-100 bg-white">
                   {stockInReceipts.map((r) => {
                     const item = r.stock_in_items?.[0] || r.purchase_receipt_items?.[0];
                     const prodName = item?.products?.name || 'Beverage Cases';
@@ -345,33 +363,35 @@ export const PurchasingPage: React.FC = () => {
                     const valAmount = r.total_amount || (casesCount * (item?.unit_cost || 0));
 
                     return (
-                      <tr key={r.id} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="px-6 py-4 font-mono font-bold text-emerald-400 text-xs">
+                      <tr key={r.id} className="hover:bg-zinc-50 transition-colors">
+                        <td className="px-4 py-3 font-mono font-semibold text-zinc-900 text-xs">
                           {r.control_number || r.reference_number}
                         </td>
-                        <td className="px-6 py-4 font-semibold text-white">
+                        <td className="px-4 py-3 font-medium text-zinc-900">
                           {r.supplier_name || r.suppliers?.name || 'Direct Supplier'}
                         </td>
-                        <td className="px-6 py-4 font-mono text-slate-400 text-xs">
+                        <td className="px-4 py-3 font-mono text-zinc-500 text-xs">
                           {r.reference_number || 'N/A'}
                         </td>
-                        <td className="px-6 py-4 font-semibold text-white">
-                          {prodName} <span className="font-mono text-emerald-400 font-bold">({casesCount} cases)</span>
+                        <td className="px-4 py-3 font-medium text-zinc-900">
+                          {prodName} <span className="font-mono text-zinc-700 font-semibold">({casesCount} cs)</span>
                         </td>
-                        <td className="px-6 py-4 font-mono font-bold text-white text-right">
+                        <td className="px-4 py-3 font-mono font-semibold text-zinc-900 text-right">
                           ₱{Number(valAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="px-6 py-4 text-xs text-slate-500">
-                          {new Date(r.created_at).toLocaleString()}
+                        <td className="px-4 py-3 text-xs text-zinc-500">
+                          {new Date(r.created_at).toLocaleDateString()}
                         </td>
-                        <td className="px-6 py-4 text-right">
-                          <button
+                        <td className="px-4 py-3 text-right">
+                          <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => setSelectedReceipt(r)}
-                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 font-bold text-xs flex items-center space-x-1 ml-auto border border-slate-700"
+                            className="h-7 text-xs ml-auto"
                           >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>Control Voucher</span>
-                          </button>
+                            <Eye className="w-3.5 h-3.5 mr-1" />
+                            <span>Voucher</span>
+                          </Button>
                         </td>
                       </tr>
                     );
@@ -379,43 +399,49 @@ export const PurchasingPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
-          </div>
+          </Card>
         )}
       </div>
 
       {/* Add Supplier Modal */}
       {isSupModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
-              <h3 className="text-lg font-bold">Add Beverage Supplier</h3>
-              <button onClick={() => setIsSupModalOpen(false)} className="text-slate-400">✕</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="bg-white border border-zinc-200 rounded-lg max-w-md w-full p-6 shadow-xl text-zinc-900">
+            <div className="flex items-center justify-between border-b border-zinc-200 pb-3 mb-3">
+              <h3 className="text-base font-semibold">Add Beverage Supplier</h3>
+              <button onClick={() => setIsSupModalOpen(false)} className="text-zinc-400 hover:text-zinc-700 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            <form onSubmit={handleCreateSupplier} className="space-y-4 text-sm">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Supplier Company Name *</label>
-                <input
+            <form onSubmit={handleCreateSupplier} className="space-y-3.5 text-sm">
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700">Supplier Company Name *</label>
+                <Input
                   type="text"
                   required
                   placeholder="San Miguel Brewery Inc."
                   value={supName}
                   onChange={(e) => setSupName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
+                  className="text-xs"
                 />
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Contact Person</label>
-                <input
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700">Contact Person</label>
+                <Input
                   type="text"
                   placeholder="Account Representative"
                   value={contactPerson}
                   onChange={(e) => setContactPerson(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
+                  className="text-xs"
                 />
               </div>
-              <div className="flex justify-end space-x-3 pt-3 border-t border-slate-800">
-                <button type="button" onClick={() => setIsSupModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-300 text-xs rounded-xl">Cancel</button>
-                <button type="submit" disabled={saving} className="px-4 py-2 bg-indigo-600 text-white text-xs font-semibold rounded-xl">Save Supplier</button>
+              <div className="flex justify-end space-x-2 pt-3 border-t border-zinc-200">
+                <Button type="button" variant="outline" size="sm" onClick={() => setIsSupModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" disabled={saving}>
+                  Save Supplier
+                </Button>
               </div>
             </form>
           </div>
@@ -424,25 +450,27 @@ export const PurchasingPage: React.FC = () => {
 
       {/* New Stock In Receiving Modal */}
       {isStockInModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl text-slate-100 space-y-4 my-8">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-lg font-bold flex items-center space-x-2">
-                <PackageCheck className="w-5 h-5 text-emerald-400" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white border border-zinc-200 rounded-lg max-w-md w-full p-6 shadow-xl text-zinc-900 space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-zinc-200 pb-3">
+              <h3 className="text-base font-semibold flex items-center space-x-2">
+                <PackageCheck className="w-4 h-4 text-zinc-700" />
                 <span>New Stock In Batch Receiving</span>
               </h3>
-              <button onClick={() => setIsStockInModalOpen(false)} className="text-slate-400">✕</button>
+              <button onClick={() => setIsStockInModalOpen(false)} className="text-zinc-400 hover:text-zinc-700 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
-            {error && <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs rounded-xl">{error}</div>}
+            {error && <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-md">{error}</div>}
 
-            <form onSubmit={handleConfirmStockIn} className="space-y-4 text-sm">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Select Supplier</label>
+            <form onSubmit={handleConfirmStockIn} className="space-y-3.5 text-sm">
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700">Select Supplier</label>
                 <select
                   value={selectedSupId}
                   onChange={(e) => setSelectedSupId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-white border border-zinc-300 rounded-md px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-950 cursor-pointer"
                 >
                   <option value="">Select supplier account...</option>
                   {suppliers.map((s) => (
@@ -451,13 +479,13 @@ export const PurchasingPage: React.FC = () => {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Select Product SKU *</label>
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700">Select Product SKU *</label>
                 <select
                   required
                   value={selectedProdId}
                   onChange={(e) => setSelectedProdId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-white border border-zinc-300 rounded-md px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-950 cursor-pointer"
                 >
                   <option value="">Select beverage product...</option>
                   {products.map((p) => (
@@ -467,82 +495,84 @@ export const PurchasingPage: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-emerald-400 mb-1">Cases Received *</label>
-                  <input
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-zinc-700">Cases Received *</label>
+                  <Input
                     type="number"
                     min="1"
                     required
                     value={qtyCases}
                     onChange={(e) => setQtyCases(parseInt(e.target.value) || 1)}
-                    className="w-full bg-slate-950 border border-emerald-500/50 rounded-xl px-3.5 py-2 text-white font-bold text-base focus:outline-none focus:border-emerald-500"
+                    className="font-mono text-xs font-semibold"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Unit Case Cost (₱)</label>
-                  <input
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-zinc-700">Unit Case Cost (₱)</label>
+                  <Input
                     type="number"
                     step="0.01"
                     value={unitCost}
                     onChange={(e) => setUnitCost(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-indigo-500"
+                    className="font-mono text-xs"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-amber-400 mb-1">Batch Lot Number *</label>
-                  <input
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-zinc-700">Batch Lot Number *</label>
+                  <Input
                     type="text"
                     required
                     value={batchNum}
                     onChange={(e) => setBatchNum(e.target.value)}
-                    className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 font-mono font-bold text-white uppercase focus:outline-none focus:border-amber-500"
+                    className="font-mono uppercase text-xs font-semibold"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Supplier Ref / Invoice #</label>
-                  <input
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-zinc-700">Supplier Invoice / Ref #</label>
+                  <Input
                     type="text"
                     placeholder="INV-88219"
                     value={refNumber}
                     onChange={(e) => setRefNumber(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-indigo-500"
+                    className="font-mono text-xs"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Manufacture Date</label>
-                  <input
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-zinc-700">Manufacture Date</label>
+                  <Input
                     type="date"
                     value={mfgDate}
                     onChange={(e) => setMfgDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white text-xs focus:outline-none focus:border-indigo-500"
+                    className="text-xs font-mono"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-amber-400 mb-1">Expiration Date *</label>
-                  <input
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-zinc-700">Expiration Date *</label>
+                  <Input
                     type="date"
                     required
                     value={expDate}
                     onChange={(e) => setExpDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-white text-xs font-bold focus:outline-none focus:border-amber-500"
+                    className="text-xs font-mono font-semibold"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end space-x-3 pt-3 border-t border-slate-800">
-                <button type="button" onClick={() => setIsStockInModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-300 text-xs rounded-xl font-semibold">Cancel</button>
-                <button type="submit" disabled={saving} className="px-5 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/30">
-                  {saving ? 'Receiving Stock...' : 'Confirm Stock In & Generate Control #'}
-                </button>
+              <div className="flex justify-end space-x-2 pt-3 border-t border-zinc-200">
+                <Button type="button" variant="outline" size="sm" onClick={() => setIsStockInModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" disabled={saving}>
+                  {saving ? 'Receiving...' : 'Confirm Stock In'}
+                </Button>
               </div>
             </form>
           </div>
@@ -551,50 +581,52 @@ export const PurchasingPage: React.FC = () => {
 
       {/* Printable Control Voucher Modal */}
       {selectedReceipt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl text-slate-100 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="bg-white border border-zinc-200 rounded-lg max-w-lg w-full p-6 shadow-xl text-zinc-900 space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-200 pb-3">
               <div>
-                <h3 className="font-extrabold text-lg text-white flex items-center space-x-2">
-                  <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-semibold text-base flex items-center space-x-2 text-zinc-900">
+                  <ShieldCheck className="w-4 h-4 text-zinc-700" />
                   <span>Stock In Control Voucher</span>
                 </h3>
-                <p className="text-xs text-emerald-400 font-mono font-bold mt-0.5">{selectedReceipt.control_number}</p>
+                <p className="text-xs text-zinc-500 font-mono mt-0.5">{selectedReceipt.control_number}</p>
               </div>
-              <button onClick={() => setSelectedReceipt(null)} className="text-slate-400 hover:text-white">✕</button>
+              <button onClick={() => setSelectedReceipt(null)} className="text-zinc-400 hover:text-zinc-700 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
-            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-xs space-y-2 font-mono">
-              <div className="flex justify-between border-b border-slate-800 pb-1 text-slate-300">
+            <div className="bg-zinc-50 p-3 rounded-md border border-zinc-200 text-xs space-y-1.5 font-mono">
+              <div className="flex justify-between border-b border-zinc-200 pb-1 text-zinc-600">
                 <span>Distributor Tenant:</span>
-                <span className="font-bold text-white">{tenant?.name}</span>
+                <span className="font-semibold text-zinc-900">{tenant?.name}</span>
               </div>
-              <div className="flex justify-between border-b border-slate-800 pb-1 text-slate-300">
-                <span>Supplier Name:</span>
-                <span className="font-bold text-white">{selectedReceipt.supplier_name || selectedReceipt.suppliers?.name || 'Direct Supplier'}</span>
+              <div className="flex justify-between border-b border-zinc-200 pb-1 text-zinc-600">
+                <span>Supplier:</span>
+                <span className="font-semibold text-zinc-900">{selectedReceipt.supplier_name || selectedReceipt.suppliers?.name || 'Direct Supplier'}</span>
               </div>
-              <div className="flex justify-between border-b border-slate-800 pb-1 text-slate-300">
-                <span>Invoice / PO Ref:</span>
-                <span className="font-bold text-white">{selectedReceipt.reference_number || 'N/A'}</span>
+              <div className="flex justify-between border-b border-zinc-200 pb-1 text-zinc-600">
+                <span>Ref / PO:</span>
+                <span className="font-semibold text-zinc-900">{selectedReceipt.reference_number || 'N/A'}</span>
               </div>
-              <div className="flex justify-between text-slate-300 pt-1">
-                <span>Date & Time Logged:</span>
-                <span className="text-slate-400">{new Date(selectedReceipt.created_at).toLocaleString()}</span>
+              <div className="flex justify-between text-zinc-600 pt-0.5">
+                <span>Date Logged:</span>
+                <span className="text-zinc-900">{new Date(selectedReceipt.created_at).toLocaleString()}</span>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-wider">Received Itemized Line Details</h4>
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-2 text-xs font-mono">
+            <div className="space-y-1.5">
+              <h4 className="text-xs font-semibold text-zinc-700 uppercase tracking-wider">Line Items</h4>
+              <div className="bg-zinc-50 border border-zinc-200 rounded-md p-3 space-y-1.5 text-xs font-mono">
                 {selectedReceipt.stock_in_items?.map((item: any) => (
-                  <div key={item.id} className="flex justify-between items-center border-b border-slate-800/80 pb-2">
+                  <div key={item.id} className="flex justify-between items-center border-b border-zinc-200 pb-1.5 last:border-0 last:pb-0">
                     <div>
-                      <div className="font-bold text-white">{item.products?.name || 'Beverage Product'}</div>
-                      <div className="text-[10px] text-amber-400 font-bold">Batch Lot: {item.batch_number} (Exp: {item.expiry_date})</div>
+                      <div className="font-semibold text-zinc-900">{item.products?.name || 'Beverage Product'}</div>
+                      <div className="text-[10px] text-zinc-500">Lot: {item.batch_number} (Exp: {item.expiry_date})</div>
                     </div>
                     <div className="text-right">
-                      <div className="font-black text-emerald-400 text-sm">{item.quantity_cases} cases</div>
-                      <div className="text-[10px] text-slate-400">₱{item.unit_price} / case</div>
+                      <div className="font-bold text-zinc-900 text-xs">{item.quantity_cases} cases</div>
+                      <div className="text-[10px] text-zinc-500">₱{item.unit_price} / cs</div>
                     </div>
                   </div>
                 ))}
@@ -602,20 +634,22 @@ export const PurchasingPage: React.FC = () => {
             </div>
 
             <div className="flex justify-between items-center pt-2">
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => window.print()}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center space-x-1.5 border border-slate-700"
+                className="flex items-center space-x-1.5"
               >
-                <Printer className="w-4 h-4 text-indigo-400" />
-                <span>Print Control Receipt</span>
-              </button>
+                <Printer className="w-3.5 h-3.5" />
+                <span>Print Receipt</span>
+              </Button>
 
-              <button
+              <Button
+                size="sm"
                 onClick={() => setSelectedReceipt(null)}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30"
               >
-                Close Control Voucher
-              </button>
+                Close Voucher
+              </Button>
             </div>
           </div>
         </div>

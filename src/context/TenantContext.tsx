@@ -127,6 +127,14 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   useEffect(() => {
     fetchTenantData();
+
+    if (!isSupabaseConfigured) return;
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event) => {
+      fetchTenantData();
+    });
+
+    return () => subscription.unsubscribe();
   }, [tenantSlug]);
 
   const setDevTenantSlug = (slug: string) => {

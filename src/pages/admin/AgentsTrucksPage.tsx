@@ -2,13 +2,35 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
+import { useModal } from '../../context/ModalContext';
 import type { Agent, Truck } from '../../types/database.types';
 import { EmptyState } from '../../components/EmptyState';
 import { Truck as TruckIcon, UserCheck, Plus, Key, Mail } from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Badge } from '../../components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '../../components/ui/dialog';
 
 export const AgentsTrucksPage: React.FC = () => {
   const { tenant } = useTenant();
   const { createSecondaryUser } = useAuth();
+  const { showSuccess, showError } = useModal();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [trucks, setTrucks] = useState<Truck[]>([]);
 
@@ -87,12 +109,19 @@ export const AgentsTrucksPage: React.FC = () => {
       ]);
 
       setIsTruckModalOpen(false);
+      const createdPlate = plateNumber.toUpperCase().trim();
       setPlateNumber('');
       setTruckCode('');
       setDescription('');
       fetchData();
+      showSuccess({
+        title: 'Truck Registered',
+        description: `Truck "${createdPlate}" has been added to your fleet.`,
+      });
     } catch (err: any) {
-      setError(err.message || 'Failed to create truck.');
+      const msg = err.message || 'Failed to create truck.';
+      setError(msg);
+      showError({ title: 'Registration Failed', description: msg });
     } finally {
       setSaving(false);
     }
@@ -101,14 +130,15 @@ export const AgentsTrucksPage: React.FC = () => {
   const handleCreateAgent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tenant || !employeeCode || !fullName || !agentEmail || !agentPassword) {
-      setError('Employee code, Full Name, Email, and Password are required for Agent account creation.');
+      const msg = 'Employee code, Full Name, Email, and Password are required for Agent account creation.';
+      setError(msg);
+      showError({ title: 'Missing Information', description: msg });
       return;
     }
     setSaving(true);
     setError(null);
 
     try {
-      // 1. Create Auth Account for Agent using isolated client (keeps Admin session active!)
       const { data: userData, error: authErr } = await createSecondaryUser(
         agentEmail.trim(),
         agentPassword,
@@ -121,7 +151,6 @@ export const AgentsTrucksPage: React.FC = () => {
 
       const userId = userData?.user?.id || null;
 
-      // 2. Insert record into agents table
       await supabase.from('agents').insert([
         {
           tenant_id: tenant.id,
@@ -135,6 +164,7 @@ export const AgentsTrucksPage: React.FC = () => {
       ]);
 
       setIsAgentModalOpen(false);
+      const createdName = fullName.trim();
       setEmployeeCode('');
       setFullName('');
       setAgentEmail('');
@@ -142,8 +172,14 @@ export const AgentsTrucksPage: React.FC = () => {
       setPhone('');
       setAssignedTruckId('');
       fetchData();
+      showSuccess({
+        title: 'Agent Account Created',
+        description: `Route sales credentials created for "${createdName}".`,
+      });
     } catch (err: any) {
-      setError(err.message || 'Failed to create agent account.');
+      const msg = err.message || 'Failed to create agent account.';
+      setError(msg);
+      showError({ title: 'Creation Failed', description: msg });
     } finally {
       setSaving(false);
     }
@@ -151,33 +187,36 @@ export const AgentsTrucksPage: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-200 pb-5">
         <div>
-          <h1 className="text-2xl font-extrabold text-white">Agents & Delivery Fleet</h1>
-          <p className="text-slate-400 text-sm">Register route agents with mobile tablet login credentials & trucks</p>
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Agents & Fleet Management</h1>
+          <p className="text-sm text-zinc-500 mt-1">Register delivery trucks and create route agent mobile credentials</p>
         </div>
 
-        <div className="flex items-center space-x-3">
-          <button
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
             onClick={() => setIsAgentModalOpen(true)}
-            className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold border border-slate-700 flex items-center space-x-2 transition-all"
+            className="gap-1.5"
           >
-            <Plus className="w-4 h-4 text-indigo-400" />
+            <Plus className="w-4 h-4" />
             <span>Create Agent Account</span>
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => setIsTruckModalOpen(true)}
-            className="px-3.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold flex items-center space-x-2 transition-all shadow-lg shadow-indigo-600/30"
+            className="gap-1.5"
           >
             <Plus className="w-4 h-4" />
             <span>Register Truck</span>
-          </button>
+          </Button>
         </div>
       </div>
 
+      {/* Trucks Section */}
       <div className="space-y-4">
-        <h2 className="text-lg font-bold text-white flex items-center space-x-2">
-          <TruckIcon className="w-5 h-5 text-cyan-400" />
+        <h2 className="text-base font-bold text-zinc-900 flex items-center gap-2">
+          <TruckIcon className="w-4 h-4 text-zinc-700" />
           <span>Delivery Trucks ({trucks.length})</span>
         </h2>
 
@@ -191,28 +230,29 @@ export const AgentsTrucksPage: React.FC = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {trucks.map((t) => (
-              <div key={t.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs font-bold text-cyan-400 px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/20">
-                    {t.truck_code}
-                  </span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-medium">
-                    {t.status}
-                  </span>
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-white">{t.plate_number}</h3>
-                  <p className="text-xs text-slate-400">{t.description || 'Standard Delivery Vehicle'}</p>
-                </div>
-              </div>
+              <Card key={t.id}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <Badge variant="outline" className="font-mono text-xs">
+                      {t.truck_code}
+                    </Badge>
+                    <Badge variant="secondary" className="text-xs">
+                      {t.status}
+                    </Badge>
+                  </div>
+                  <CardTitle className="text-lg mt-2 font-mono">{t.plate_number}</CardTitle>
+                  <CardDescription>{t.description || 'Standard Delivery Vehicle'}</CardDescription>
+                </CardHeader>
+              </Card>
             ))}
           </div>
         )}
       </div>
 
-      <div className="space-y-4 pt-4 border-t border-slate-800">
-        <h2 className="text-lg font-bold text-white flex items-center space-x-2">
-          <UserCheck className="w-5 h-5 text-indigo-400" />
+      {/* Route Agents Section */}
+      <div className="space-y-4 pt-6 border-t border-zinc-200">
+        <h2 className="text-base font-bold text-zinc-900 flex items-center gap-2">
+          <UserCheck className="w-4 h-4 text-zinc-700" />
           <span>Route Agents ({agents.length})</span>
         </h2>
 
@@ -224,195 +264,209 @@ export const AgentsTrucksPage: React.FC = () => {
             onAction={() => setIsAgentModalOpen(true)}
           />
         ) : (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-950 text-slate-400 uppercase text-xs font-semibold tracking-wider border-b border-slate-800">
-                <tr>
-                  <th className="px-6 py-4">Employee Code</th>
-                  <th className="px-6 py-4">Full Name</th>
-                  <th className="px-6 py-4">Phone</th>
-                  <th className="px-6 py-4">Tablet Auth Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {agents.map((ag) => (
-                  <tr key={ag.id} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="px-6 py-4 font-mono text-indigo-400 font-bold">{ag.employee_code}</td>
-                    <td className="px-6 py-4 font-semibold text-white">{ag.full_name}</td>
-                    <td className="px-6 py-4 text-slate-400 text-xs">{ag.phone || 'N/A'}</td>
-                    <td className="px-6 py-4">
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                        {ag.user_id ? 'LOGIN ENABLED' : 'ACTIVE'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[140px]">Employee Code</TableHead>
+                    <TableHead>Full Name</TableHead>
+                    <TableHead>Phone</TableHead>
+                    <TableHead className="text-right">Auth Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {agents.map((ag) => (
+                    <TableRow key={ag.id}>
+                      <TableCell className="font-mono font-medium text-xs text-zinc-900">
+                        {ag.employee_code}
+                      </TableCell>
+                      <TableCell className="font-semibold text-zinc-900">
+                        {ag.full_name}
+                      </TableCell>
+                      <TableCell className="text-zinc-500 text-xs">
+                        {ag.phone || '—'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant="secondary" className="text-xs">
+                          {ag.user_id ? 'Login Active' : 'Active'}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         )}
       </div>
 
       {/* Truck Modal */}
-      {isTruckModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
-              <h3 className="text-lg font-bold">Register Delivery Truck</h3>
-              <button onClick={() => setIsTruckModalOpen(false)} className="text-slate-400">✕</button>
+      <Dialog open={isTruckModalOpen} onOpenChange={setIsTruckModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Register Delivery Truck</DialogTitle>
+            <DialogDescription>
+              Add a new vehicle to the distribution fleet.
+            </DialogDescription>
+          </DialogHeader>
+
+          {error && <div className="p-2 bg-red-50 text-red-600 text-xs rounded">{error}</div>}
+
+          <form onSubmit={handleCreateTruck} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">Truck Code *</label>
+              <Input
+                type="text"
+                required
+                placeholder="TRK-001"
+                value={truckCode}
+                onChange={(e) => setTruckCode(e.target.value)}
+                className="font-mono uppercase"
+              />
             </div>
-            {error && <div className="p-3 mb-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">{error}</div>}
-            <form onSubmit={handleCreateTruck} className="space-y-4 text-sm">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Truck Code *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="TRK-001"
-                  value={truckCode}
-                  onChange={(e) => setTruckCode(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Plate Number *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="ABC-1234"
-                  value={plateNumber}
-                  onChange={(e) => setPlateNumber(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono uppercase"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Description</label>
-                <input
-                  type="text"
-                  placeholder="6-wheeler beverage truck"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2"
-                />
-              </div>
-              <div className="flex justify-end space-x-3 pt-3 border-t border-slate-800">
-                <button type="button" onClick={() => setIsTruckModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-300 text-xs rounded-xl">Cancel</button>
-                <button type="submit" disabled={saving} className="px-4 py-2 bg-indigo-600 text-white text-xs font-semibold rounded-xl">Register</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">Plate Number *</label>
+              <Input
+                type="text"
+                required
+                placeholder="ABC-1234"
+                value={plateNumber}
+                onChange={(e) => setPlateNumber(e.target.value)}
+                className="font-mono uppercase"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">Description</label>
+              <Input
+                type="text"
+                placeholder="6-wheeler beverage truck"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsTruckModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? 'Registering...' : 'Register Truck'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Agent Auth Account Creation Modal */}
-      {isAgentModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-100 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
-              <h3 className="text-lg font-bold">Create Agent Login Account</h3>
-              <button onClick={() => setIsAgentModalOpen(false)} className="text-slate-400">✕</button>
-            </div>
-            {error && <div className="p-3 mb-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">{error}</div>}
-            <form onSubmit={handleCreateAgent} className="space-y-4 text-sm">
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Emp Code *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="AG-101"
-                    value={employeeCode}
-                    onChange={(e) => setEmployeeCode(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono uppercase text-xs"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Agent Full Name *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Juan Dela Cruz"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs"
-                  />
-                </div>
+      <Dialog open={isAgentModalOpen} onOpenChange={setIsAgentModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create Agent Account</DialogTitle>
+            <DialogDescription>
+              Create credentials for mobile tablet access.
+            </DialogDescription>
+          </DialogHeader>
+
+          {error && <div className="p-2 bg-red-50 text-red-600 text-xs rounded">{error}</div>}
+
+          <form onSubmit={handleCreateAgent} className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Emp Code *</label>
+                <Input
+                  type="text"
+                  required
+                  placeholder="AG-101"
+                  value={employeeCode}
+                  onChange={(e) => setEmployeeCode(e.target.value)}
+                  className="font-mono uppercase text-xs"
+                />
               </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Agent Full Name *</label>
+                <Input
+                  type="text"
+                  required
+                  placeholder="Juan Dela Cruz"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                />
+              </div>
+            </div>
 
-              {/* Login Credentials Section */}
-              <div className="space-y-3 pt-3 border-t border-slate-800">
-                <h4 className="text-xs font-mono font-bold uppercase text-emerald-400 flex items-center space-x-1.5">
-                  <Key className="w-3.5 h-3.5" />
-                  <span>Agent Tablet Login Credentials</span>
-                </h4>
+            {/* Login Credentials Section */}
+            <div className="space-y-3 pt-3 border-t border-zinc-200">
+              <h4 className="text-xs font-semibold uppercase text-zinc-900 flex items-center gap-1.5">
+                <Key className="w-3.5 h-3.5 text-zinc-600" />
+                <span>Tablet Login Credentials</span>
+              </h4>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Agent Email *</label>
-                  <div className="relative">
-                    <Mail className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
-                    <input
-                      type="email"
-                      required
-                      placeholder="agent1@distributor.com"
-                      value={agentEmail}
-                      onChange={(e) => setAgentEmail(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Agent Password *</label>
-                  <input
-                    type="password"
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Agent Email *</label>
+                <div className="relative">
+                  <Mail className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-3" />
+                  <Input
+                    type="email"
                     required
-                    placeholder="••••••••"
-                    value={agentPassword}
-                    onChange={(e) => setAgentPassword(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs"
+                    placeholder="agent1@distributor.com"
+                    value={agentEmail}
+                    onChange={(e) => setAgentEmail(e.target.value)}
+                    className="pl-9"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Phone Number</label>
-                <input
-                  type="text"
-                  placeholder="+63 917 111 2222"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs"
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Agent Password *</label>
+                <Input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={agentPassword}
+                  onChange={(e) => setAgentPassword(e.target.value)}
                 />
               </div>
+            </div>
 
-              {trucks.length > 0 && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Assign Truck (Optional)</label>
-                  <select
-                    value={assignedTruckId}
-                    onChange={(e) => setAssignedTruckId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs"
-                  >
-                    <option value="">No truck assigned yet</option>
-                    {trucks.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.truck_code} — {t.plate_number}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">Phone Number</label>
+              <Input
+                type="text"
+                placeholder="+63 917 111 2222"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </div>
 
-              <div className="flex justify-end space-x-3 pt-3 border-t border-slate-800">
-                <button type="button" onClick={() => setIsAgentModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-300 text-xs rounded-xl">Cancel</button>
-                <button type="submit" disabled={saving} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl shadow-md shadow-indigo-600/30">
-                  {saving ? 'Creating Agent...' : 'Create Agent Account'}
-                </button>
+            {trucks.length > 0 && (
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Assign Truck (Optional)</label>
+                <select
+                  value={assignedTruckId}
+                  onChange={(e) => setAssignedTruckId(e.target.value)}
+                  className="w-full bg-white border border-zinc-200 rounded-lg px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+                >
+                  <option value="">No truck assigned yet</option>
+                  {trucks.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.truck_code} — {t.plate_number}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+            )}
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsAgentModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? 'Creating...' : 'Create Account'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

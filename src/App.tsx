@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { TenantProvider } from './context/TenantContext';
 import { AuthProvider } from './context/AuthContext';
+import { ModalProvider } from './context/ModalContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 // Superadmin
@@ -39,69 +40,71 @@ export const App: React.FC = () => {
   return (
     <AuthProvider>
       <TenantProvider>
-        <Router>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
+        <ModalProvider>
+          <Router>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
 
-            {/* Platform Superadmin ODC Route (Protected for Superadmin only) */}
-            <Route
-              path="/odc"
-              element={
-                <ProtectedRoute requireSuperAdmin>
-                  <SuperAdminDashboard />
-                </ProtectedRoute>
-              }
-            />
+              {/* Platform Superadmin ODC Route (Protected for Superadmin only) */}
+              <Route
+                path="/odc"
+                element={
+                  <ProtectedRoute requireSuperAdmin>
+                    <SuperAdminDashboard />
+                  </ProtectedRoute>
+                }
+              />
 
-            {/* Desktop Admin Portal Routes (Protected for Auth users) */}
-            <Route
-              path="/admin/*"
-              element={
-                <ProtectedRoute>
-                  <AdminLayout>
-                    <Routes>
-                      <Route index element={<AdminDashboard />} />
-                      <Route path="products" element={<ProductsPage />} />
-                      <Route path="warehouse" element={<WarehousePage />} />
-                      <Route path="transfers" element={<StockTransfersPage />} />
-                      <Route path="promotions" element={<PromotionsPage />} />
-                      <Route path="agents-trucks" element={<AgentsTrucksPage />} />
-                      <Route path="stores" element={<MicroStoresPage />} />
-                      <Route path="sales" element={<SalesPage />} />
-                      <Route path="pundo" element={<ReturnablesPundoPage />} />
-                      <Route path="purchasing" element={<PurchasingPage />} />
-                      <Route path="reports" element={<ReportsPage />} />
-                      <Route path="users" element={<UserManagementPage />} />
-                      <Route path="settings" element={<SettingsPage />} />
-                    </Routes>
-                  </AdminLayout>
-                </ProtectedRoute>
-              }
-            />
+              {/* Desktop Admin Portal Routes (Protected for Auth users) */}
+              <Route
+                path="/admin/*"
+                element={
+                  <ProtectedRoute>
+                    <AdminLayout>
+                      <Routes>
+                        <Route index element={<AdminDashboard />} />
+                        <Route path="products" element={<ProductsPage />} />
+                        <Route path="warehouse" element={<WarehousePage />} />
+                        <Route path="transfers" element={<StockTransfersPage />} />
+                        <Route path="promotions" element={<PromotionsPage />} />
+                        <Route path="agents-trucks" element={<AgentsTrucksPage />} />
+                        <Route path="stores" element={<MicroStoresPage />} />
+                        <Route path="sales" element={<SalesPage />} />
+                        <Route path="pundo" element={<ReturnablesPundoPage />} />
+                        <Route path="purchasing" element={<PurchasingPage />} />
+                        <Route path="reports" element={<ReportsPage />} />
+                        <Route path="users" element={<UserManagementPage />} />
+                        <Route path="settings" element={<SettingsPage />} />
+                      </Routes>
+                    </AdminLayout>
+                  </ProtectedRoute>
+                }
+              />
 
-            {/* Tablet/Mobile Agent Routes (Protected for Auth users) */}
-            <Route
-              path="/agent/*"
-              element={
-                <ProtectedRoute>
-                  <AgentLayout>
-                    <Routes>
-                      <Route index element={<AgentDashboard />} />
-                      <Route path="deliver" element={<AgentDeliveryFlow />} />
-                      <Route path="sales-history" element={<AgentSalesHistory />} />
-                      <Route path="truck" element={<AgentTruckStock />} />
-                      <Route path="pundo" element={<AgentPundoView />} />
-                      <Route path="reconcile" element={<AgentReconciliation />} />
-                    </Routes>
-                  </AgentLayout>
-                </ProtectedRoute>
-              }
-            />
+              {/* Tablet/Mobile Agent Routes (Protected for Auth users) */}
+              <Route
+                path="/agent/*"
+                element={
+                  <ProtectedRoute>
+                    <AgentLayout>
+                      <Routes>
+                        <Route index element={<AgentDashboard />} />
+                        <Route path="deliver" element={<AgentDeliveryFlow />} />
+                        <Route path="sales-history" element={<AgentSalesHistory />} />
+                        <Route path="truck" element={<AgentTruckStock />} />
+                        <Route path="pundo" element={<AgentPundoView />} />
+                        <Route path="reconcile" element={<AgentReconciliation />} />
+                      </Routes>
+                    </AgentLayout>
+                  </ProtectedRoute>
+                }
+              />
 
-            {/* Fallback redirect */}
-            <Route path="*" element={<Navigate to="/login" replace />} />
-          </Routes>
-        </Router>
+              {/* Fallback redirect */}
+              <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
+          </Router>
+        </ModalProvider>
       </TenantProvider>
     </AuthProvider>
   );

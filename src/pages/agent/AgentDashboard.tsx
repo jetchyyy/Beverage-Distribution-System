@@ -4,6 +4,9 @@ import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import { Truck, ShoppingBag, ArrowRight, Package } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Button } from '../../components/ui/button';
+import { Badge } from '../../components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
 
 export const AgentDashboard: React.FC = () => {
   const { tenant } = useTenant();
@@ -21,7 +24,6 @@ export const AgentDashboard: React.FC = () => {
   const fetchAgentDashboard = async () => {
     if (!tenant) return;
     try {
-      // 1. Resolve Assigned Truck for Tenant / Agent User
       let targetTruck: any = null;
 
       if (profile?.id) {
@@ -35,6 +37,13 @@ export const AgentDashboard: React.FC = () => {
 
         if (agData?.trucks) {
           targetTruck = agData.trucks;
+        } else if (agData?.assigned_truck_id) {
+          const { data: trk } = await supabase
+            .from('trucks')
+            .select('*')
+            .eq('id', agData.assigned_truck_id)
+            .maybeSingle();
+          targetTruck = trk;
         }
       }
 
@@ -43,6 +52,7 @@ export const AgentDashboard: React.FC = () => {
           .from('trucks')
           .select('*')
           .eq('tenant_id', tenant.id)
+          .order('truck_code')
           .limit(1)
           .maybeSingle();
 
@@ -56,7 +66,6 @@ export const AgentDashboard: React.FC = () => {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
-        // Fetch Balances and Today's Sales in parallel
         const [balsRes, rBalsRes, salesTodayRes] = await Promise.all([
           supabase
             .from('inventory_balances')
@@ -116,100 +125,132 @@ export const AgentDashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 border border-indigo-700/50 rounded-3xl p-6 shadow-xl relative overflow-hidden">
-        <div className="flex items-center justify-between">
-          <div>
-            <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-300 bg-indigo-950/80 px-2.5 py-1 rounded-full border border-indigo-700/60">
-              Truck: {truckCode}
-            </span>
-            <h1 className="text-2xl font-black text-white mt-2">
-              Good Morning, {profile?.full_name || 'Route Agent'}! 👋
-            </h1>
-            <p className="text-xs text-indigo-200 mt-1">Ready for today's store delivery route?</p>
+      {/* Welcome & Action Banner */}
+      <Card className="bg-zinc-950 text-white border-zinc-900 shadow-md">
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <Badge
+                variant="outline"
+                className="text-black border-zinc-700 font-mono text-xs"
+              >
+                Assigned Truck: {truckCode}
+              </Badge>
+              <CardTitle className="text-2xl text-white mt-2">
+                Good day, {profile?.full_name || 'Route Agent'}
+              </CardTitle>
+              <CardDescription className="text-zinc-400 text-xs">
+                Ready for today's store delivery route?
+              </CardDescription>
+            </div>
+            <div className="p-3 bg-zinc-900 rounded-xl hidden sm:block">
+              <Truck className="w-8 h-8 text-zinc-300" />
+            </div>
           </div>
-          <div className="p-4 bg-white/10 rounded-2xl backdrop-blur-md hidden sm:block">
-            <Truck className="w-10 h-10 text-indigo-200" />
-          </div>
-        </div>
-
-        <div className="mt-6 pt-4 border-t border-indigo-700/40 flex items-center justify-between">
-          <button
+        </CardHeader>
+        <CardContent className="pt-0">
+          <Button
+            size="lg"
             onClick={() => navigate('/agent/deliver')}
-            className="w-full py-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-base flex items-center justify-center space-x-2 shadow-lg shadow-emerald-500/30 touch-target active:scale-95 transition-all"
+            className="w-full h-12 bg-white text-zinc-950 hover:bg-zinc-100 font-bold text-sm gap-2"
           >
-            <ShoppingBag className="w-5 h-5" />
-            <span>START NEW STORE DELIVERY</span>
-            <ArrowRight className="w-5 h-5 ml-1" />
-          </button>
-        </div>
-      </div>
+            <ShoppingBag className="w-4 h-4" />
+            <span>Start Store Delivery</span>
+            <ArrowRight className="w-4 h-4" />
+          </Button>
+        </CardContent>
+      </Card>
 
+      {/* Summary KPI Cards */}
       <div className="space-y-3">
-        <h2 className="text-sm font-extrabold text-slate-400 uppercase tracking-wider font-mono">Today's Summary</h2>
+        <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Today's Route Overview</h2>
 
-        <div className="grid grid-cols-2 gap-3.5">
-          <div
+        <div className="grid grid-cols-2 gap-3">
+          <Card
             onClick={() => navigate('/agent/sales-history')}
-            className="bg-slate-900 border border-slate-800 hover:border-indigo-500/50 rounded-2xl p-4 cursor-pointer transition-all shadow-md group"
+            className="cursor-pointer hover:border-zinc-400 transition-colors"
           >
-            <div className="text-[10px] font-bold text-slate-400 uppercase flex justify-between items-center">
-              <span>Sales Amount</span>
-              <span className="text-[9px] text-indigo-400 group-hover:underline">View History →</span>
-            </div>
-            <div className="text-xl font-black text-emerald-400 mt-1 font-mono">
-              ₱{todaySalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-            </div>
-            <div className="text-[10px] text-slate-500 mt-0.5">{todayStoresCount} stores served today</div>
-          </div>
+            <CardHeader className="p-4 pb-2">
+              <CardDescription className="text-xs font-semibold uppercase text-zinc-500">Sales Amount</CardDescription>
+              <CardTitle className="text-xl font-bold font-mono text-zinc-900">
+                ₱{todaySalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              <div className="text-xs text-zinc-500">{todayStoresCount} stores served today</div>
+            </CardContent>
+          </Card>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-            <div className="text-[10px] font-bold text-slate-400 uppercase">Truck Stock</div>
-            <div className="text-xl font-black text-white mt-1 font-mono">{truckStockCount} cases</div>
-            <div className="text-[10px] text-indigo-400 mt-0.5">On board vehicle</div>
-          </div>
+          <Card>
+            <CardHeader className="p-4 pb-2">
+              <CardDescription className="text-xs font-semibold uppercase text-zinc-500">Truck Stock</CardDescription>
+              <CardTitle className="text-xl font-bold font-mono text-zinc-900">
+                {truckStockCount} <span className="text-xs font-normal text-zinc-500">cases</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              <div className="text-xs text-zinc-500">On board vehicle</div>
+            </CardContent>
+          </Card>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-            <div className="text-[10px] font-bold text-slate-400 uppercase">Bottles Collected</div>
-            <div className="text-xl font-black text-amber-300 mt-1 font-mono">{todayBottlesCollected} pcs</div>
-            <div className="text-[10px] text-slate-500 mt-0.5">Empty returns today</div>
-          </div>
+          <Card>
+            <CardHeader className="p-4 pb-2">
+              <CardDescription className="text-xs font-semibold uppercase text-zinc-500">Bottles Collected</CardDescription>
+              <CardTitle className="text-xl font-bold font-mono text-zinc-900">
+                {todayBottlesCollected} <span className="text-xs font-normal text-zinc-500">pcs</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              <div className="text-xs text-zinc-500">Empty returns today</div>
+            </CardContent>
+          </Card>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-            <div className="text-[10px] font-bold text-slate-400 uppercase">Cases Collected</div>
-            <div className="text-xl font-black text-cyan-300 mt-1 font-mono">{todayCasesCollected} cases</div>
-            <div className="text-[10px] text-slate-500 mt-0.5">Empty crates returned</div>
-          </div>
+          <Card>
+            <CardHeader className="p-4 pb-2">
+              <CardDescription className="text-xs font-semibold uppercase text-zinc-500">Cases Collected</CardDescription>
+              <CardTitle className="text-xl font-bold font-mono text-zinc-900">
+                {todayCasesCollected} <span className="text-xs font-normal text-zinc-500">cs</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              <div className="text-xs text-zinc-500">Empty crates returned</div>
+            </CardContent>
+          </Card>
         </div>
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div className="flex items-center space-x-2">
-            <Package className="w-5 h-5 text-indigo-400" />
-            <h3 className="font-bold text-white text-base">My Truck Inventory</h3>
+      {/* Current Truck Inventory Card */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Package className="w-4 h-4 text-zinc-600" />
+              <CardTitle className="text-base">Truck Inventory</CardTitle>
+            </div>
+            <Link to="/agent/truck" className="text-xs font-semibold text-zinc-900 hover:underline">
+              View All
+            </Link>
           </div>
-          <Link to="/agent/truck" className="text-xs font-bold text-indigo-400 hover:underline">
-            View All
-          </Link>
-        </div>
-
-        {truckInventoryItems.length === 0 ? (
-          <div className="py-6 text-center text-slate-500 text-xs">
-            No stock currently on truck. Transfer cases from warehouse depot to load your truck.
-          </div>
-        ) : (
-          <div className="space-y-2.5">
-            {truckInventoryItems.slice(0, 4).map((b) => (
-              <div key={b.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800">
-                <span className="font-bold text-slate-200 text-sm">{b.products?.name}</span>
-                <span className="font-extrabold font-mono text-emerald-400 text-sm">
-                  {b.quantity} {b.unit}s
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {truckInventoryItems.length === 0 ? (
+            <div className="py-6 text-center text-zinc-400 text-xs">
+              No stock currently on truck. Transfer cases from warehouse depot to load your truck.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {truckInventoryItems.slice(0, 4).map((b) => (
+                <div key={b.id} className="flex items-center justify-between p-3 rounded-lg bg-zinc-50 border border-zinc-200">
+                  <span className="font-medium text-zinc-900 text-sm">{b.products?.name}</span>
+                  <Badge variant="outline" className="font-mono text-xs font-semibold">
+                    {b.quantity} {b.unit}s
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };

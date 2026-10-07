@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
+import { useModal } from '../../context/ModalContext';
 import {
   Building2,
   Save,
@@ -18,13 +19,18 @@ import {
   ArrowRightLeft,
   CheckSquare,
   HelpCircle,
-  Sparkles,
   ExternalLink,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Textarea } from '../../components/ui/textarea';
+import { Badge } from '../../components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
 
 export const SettingsPage: React.FC = () => {
   const { tenant, refreshTenants, domainName } = useTenant();
+  const { showSuccess, showError } = useModal();
 
   const [activeSubTab, setActiveSubTab] = useState<'workflow' | 'profile'>('workflow');
 
@@ -79,9 +85,18 @@ export const SettingsPage: React.FC = () => {
 
       await refreshTenants();
       setSuccess(true);
+      showSuccess({
+        title: 'Settings Saved',
+        description: 'Tenant organization details and profile have been updated.',
+      });
       setTimeout(() => setSuccess(false), 4000);
     } catch (err: any) {
-      setError(err.message || 'Failed to update tenant settings.');
+      const msg = err.message || 'Failed to update tenant settings.';
+      setError(msg);
+      showError({
+        title: 'Save Failed',
+        description: msg,
+      });
     } finally {
       setSaving(false);
     }
@@ -89,7 +104,7 @@ export const SettingsPage: React.FC = () => {
 
   if (!tenant) {
     return (
-      <div className="py-20 text-center text-slate-500 animate-pulse">
+      <div className="py-20 text-center text-sm text-zinc-400">
         Loading tenant configuration...
       </div>
     );
@@ -101,7 +116,6 @@ export const SettingsPage: React.FC = () => {
       title: 'Setup Products & Packaging Ratios',
       icon: Package,
       path: '/admin/products',
-      color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30',
       description: 'Add beverage SKUs (San Miguel, RC Cola, etc.). Configure packaging conversion ratios (e.g. 1 Case = 24 Bottles) and set selling prices per case and per bottle.',
     },
     {
@@ -109,7 +123,6 @@ export const SettingsPage: React.FC = () => {
       title: 'Configure Bottle & Case PUNDO Rates',
       icon: RotateCcw,
       path: '/admin/pundo',
-      color: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
       description: 'Set deposit rates for empty bottles (e.g., ₱3.00/bottle) and empty cases (e.g., ₱50.00/case). Note: Bottle PUNDO and Case PUNDO are calculated separately!',
     },
     {
@@ -117,7 +130,6 @@ export const SettingsPage: React.FC = () => {
       title: 'Register Suppliers & Receive Purchase Stock',
       icon: Building2,
       path: '/admin/purchasing',
-      color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
       description: 'Register beverage suppliers. Record Purchase Receipts when factory shipments arrive at the Main Warehouse Depot to add initial stock.',
     },
     {
@@ -125,7 +137,6 @@ export const SettingsPage: React.FC = () => {
       title: 'Register Delivery Fleet & Create Agent Login Accounts',
       icon: Truck,
       path: '/admin/agents-trucks',
-      color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
       description: 'Register delivery trucks and create Route Agent accounts with login email & password for mobile tablet access.',
     },
     {
@@ -133,7 +144,6 @@ export const SettingsPage: React.FC = () => {
       title: 'Onboard Micro Stores (Sari-Sari Stores)',
       icon: Store,
       path: '/admin/stores',
-      color: 'text-purple-400 bg-purple-500/10 border-purple-500/30',
       description: 'Add retail micro stores and sari-sari store accounts served by your delivery truck routes.',
     },
     {
@@ -141,7 +151,6 @@ export const SettingsPage: React.FC = () => {
       title: 'Dispatch Stock Transfers from Warehouse to Agent Truck',
       icon: ArrowRightLeft,
       path: '/admin/transfers',
-      color: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
       description: 'Issue Stock Transfer receipts moving beverage product cases from the Main Warehouse to Agent Trucks prior to route deployment.',
     },
     {
@@ -149,7 +158,6 @@ export const SettingsPage: React.FC = () => {
       title: 'Agent Touch Delivery & Empties Collection (Mobile Tablet)',
       icon: ShoppingBag,
       path: '/agent/deliver',
-      color: 'text-rose-400 bg-rose-500/10 border-rose-500/30',
       description: 'Agent logs in on mobile/tablet -> Selects Store -> Records Delivered Cases -> Records Returned Empties. System automatically calculates separate Bottle PUNDO + Case PUNDO deposits.',
     },
     {
@@ -157,139 +165,134 @@ export const SettingsPage: React.FC = () => {
       title: 'End-of-Day Route Reconciliation & Movement Audits',
       icon: CheckSquare,
       path: '/agent/reconcile',
-      color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
       description: 'Agent submits physical end-of-route truck count. Admin inspects sales history, PUNDO ledgers, and movement audit trails in Reports.',
     },
   ];
 
   return (
-    <div className="space-y-8 max-w-5xl">
+    <div className="space-y-6 max-w-5xl">
       {/* Header */}
-      <div className="border-b border-slate-800 pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="border-b border-zinc-200 pb-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-white">System Settings & Operations Guide</h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">System Settings & Operations Guide</h1>
+          <p className="text-sm text-zinc-500 mt-1">
             Configure distributor settings & learn step-by-step system workflows
           </p>
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex items-center space-x-2 bg-slate-900 p-1.5 rounded-2xl border border-slate-800 self-start">
-          <button
+        <div className="flex items-center gap-1 bg-zinc-100 p-1 rounded-lg self-start">
+          <Button
+            variant={activeSubTab === 'workflow' ? 'default' : 'ghost'}
+            size="sm"
             onClick={() => setActiveSubTab('workflow')}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeSubTab === 'workflow'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                : 'text-slate-400 hover:text-white'
-            }`}
+            className="h-8 gap-1.5 text-xs"
           >
-            <BookOpen className="w-4 h-4" />
-            <span>Workflow & User Guide</span>
-          </button>
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Workflow Guide</span>
+          </Button>
 
-          <button
+          <Button
+            variant={activeSubTab === 'profile' ? 'default' : 'ghost'}
+            size="sm"
             onClick={() => setActiveSubTab('profile')}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeSubTab === 'profile'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                : 'text-slate-400 hover:text-white'
-            }`}
+            className="h-8 gap-1.5 text-xs"
           >
-            <Building2 className="w-4 h-4" />
-            <span>Tenant Profile Settings</span>
-          </button>
+            <Building2 className="w-3.5 h-3.5" />
+            <span>Tenant Profile</span>
+          </Button>
         </div>
       </div>
 
       {/* Tab 1: Interactive System Workflow & User Guide */}
       {activeSubTab === 'workflow' && (
-        <div className="space-y-8">
-          <div className="bg-gradient-to-r from-indigo-950/80 via-slate-900 to-slate-900 border border-indigo-800/80 rounded-3xl p-6 relative overflow-hidden">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2 max-w-2xl">
-                <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 font-mono text-xs">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>First-Time User Quickstart Guide</span>
+        <div className="space-y-6">
+          <Card className="bg-zinc-50">
+            <CardHeader>
+              <div className="flex items-start justify-between">
+                <div className="space-y-1">
+                  <Badge variant="outline" className="font-mono text-xs mb-1">
+                    System Architecture Guide
+                  </Badge>
+                  <CardTitle className="text-lg">How to Operate the Beverage Distribution System</CardTitle>
+                  <CardDescription>
+                    Follow this 8-step workflow from initial catalog setup to daily agent truck reconciliation. Click any step card to navigate directly to that module.
+                  </CardDescription>
                 </div>
-                <h2 className="text-xl font-extrabold text-white">How to Operate the Beverage Distribution System</h2>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Follow this 8-step workflow from initial catalog setup to daily agent truck reconciliation. Click any step card to navigate directly to that module.
-                </p>
+                <HelpCircle className="w-6 h-6 text-zinc-400 hidden sm:block" />
               </div>
-
-              <div className="hidden lg:block p-3 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400">
-                <HelpCircle className="w-8 h-8" />
-              </div>
-            </div>
-          </div>
+            </CardHeader>
+          </Card>
 
           {/* Workflow Steps Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {workflowSteps.map((step) => {
               const Icon = step.icon;
               return (
-                <div
-                  key={step.step}
-                  className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 hover:border-indigo-500/50 transition-all flex flex-col justify-between"
-                >
-                  <div className="space-y-3">
+                <Card key={step.step} className="flex flex-col justify-between">
+                  <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-mono font-black uppercase tracking-wider px-2.5 py-1 rounded-full bg-slate-950 text-indigo-400 border border-slate-800">
+                      <Badge variant="outline" className="font-mono text-xs">
                         Step {step.step} of 8
-                      </span>
-                      <div className={`p-2.5 rounded-2xl border ${step.color}`}>
-                        <Icon className="w-5 h-5" />
+                      </Badge>
+                      <div className="p-2 rounded-lg bg-zinc-100 text-zinc-700">
+                        <Icon className="w-4 h-4" />
                       </div>
                     </div>
 
-                    <h3 className="text-base font-bold text-white leading-snug">{step.title}</h3>
-                    <p className="text-xs text-slate-400 leading-relaxed">{step.description}</p>
-                  </div>
+                    <CardTitle className="text-base mt-2">{step.title}</CardTitle>
+                    <CardDescription className="text-xs leading-relaxed">{step.description}</CardDescription>
+                  </CardHeader>
 
-                  <div className="pt-3 border-t border-slate-800/80">
-                    <Link
-                      to={step.path}
-                      className="inline-flex items-center space-x-1.5 text-xs font-bold text-indigo-400 hover:text-indigo-300 hover:underline"
-                    >
-                      <span>Open {step.title.split(' ')[1] || 'Module'}</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </Link>
-                  </div>
-                </div>
+                  <CardContent className="pt-0">
+                    <div className="pt-3 border-t border-zinc-100">
+                      <Link
+                        to={step.path}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-900 hover:underline"
+                      >
+                        <span>Open {step.title.split(' ')[1] || 'Module'}</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
+                  </CardContent>
+                </Card>
               );
             })}
           </div>
 
           {/* Business Rules Reference Card */}
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
-            <h3 className="text-base font-bold text-white flex items-center space-x-2 border-b border-slate-800 pb-3">
-              <Shield className="w-5 h-5 text-emerald-400" />
-              <span>Core Business Rules & Accounting Policies</span>
-            </h3>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Shield className="w-4 h-4 text-zinc-700" />
+                <span>Core Business Rules & Policies</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                <div className="bg-zinc-50 p-4 rounded-lg border border-zinc-200 space-y-1">
+                  <span className="font-semibold text-zinc-900">1. Separate PUNDO Accounting</span>
+                  <p className="text-zinc-600 leading-relaxed">
+                    Bottle PUNDO and Case PUNDO are calculated separately. Returning empty bottles does not cancel outstanding case returns.
+                  </p>
+                </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5">
-                <span className="font-bold text-indigo-400">1. Separate PUNDO Accounting</span>
-                <p className="text-slate-400 leading-relaxed">
-                  Bottle PUNDO and Case PUNDO are calculated separately. Returning empty bottles does not cancel outstanding case returns.
-                </p>
-              </div>
+                <div className="bg-zinc-50 p-4 rounded-lg border border-zinc-200 space-y-1">
+                  <span className="font-semibold text-zinc-900">2. Immutable Transactions</span>
+                  <p className="text-zinc-600 leading-relaxed">
+                    Confirmed sales receipts and stock transfers cannot be deleted to ensure audit integrity and accurate historical ledgers.
+                  </p>
+                </div>
 
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5">
-                <span className="font-bold text-emerald-400">2. Immutable Transactions</span>
-                <p className="text-slate-400 leading-relaxed">
-                  Confirmed sales receipts and stock transfers cannot be deleted to ensure 100% audit integrity and accurate historical ledgers.
-                </p>
+                <div className="bg-zinc-50 p-4 rounded-lg border border-zinc-200 space-y-1">
+                  <span className="font-semibold text-zinc-900">3. Multi-Tenant Subdomain Security</span>
+                  <p className="text-zinc-600 leading-relaxed">
+                    All data is isolated by tenant subdomain (`{tenant.slug}.{domainName}`). Non-superadmin users are hard-locked to their tenant context.
+                  </p>
+                </div>
               </div>
-
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5">
-                <span className="font-bold text-cyan-400">3. Multi-Tenant Subdomain Security</span>
-                <p className="text-slate-400 leading-relaxed">
-                  All data is isolated by tenant subdomain (`{tenant.slug}.{domainName}`). Non-superadmin users are hard-locked to their tenant context.
-                </p>
-              </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -297,139 +300,142 @@ export const SettingsPage: React.FC = () => {
       {activeSubTab === 'profile' && (
         <div className="space-y-6">
           {success && (
-            <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center space-x-2">
+            <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 shrink-0" />
               <span>Tenant settings updated successfully!</span>
             </div>
           )}
 
           {error && (
-            <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold flex items-center space-x-2">
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-medium flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
           {/* Subdomain Info Card */}
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
-            <div className="flex items-center space-x-3 text-indigo-400">
-              <Globe className="w-5 h-5" />
-              <h2 className="text-base font-bold text-white">Subdomain & Routing</h2>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1">
-                <span className="text-slate-500 uppercase font-mono tracking-wider font-semibold">Tenant Subdomain Slug</span>
-                <p className="font-mono text-indigo-300 font-bold text-sm">{tenant.slug}</p>
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <Globe className="w-4 h-4 text-zinc-700" />
+                <CardTitle className="text-base">Subdomain & Routing</CardTitle>
               </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                <div className="bg-zinc-50 p-3 rounded-lg border border-zinc-200 space-y-1">
+                  <span className="text-zinc-500 uppercase font-mono font-medium text-[10px]">Tenant Subdomain Slug</span>
+                  <p className="font-mono font-semibold text-zinc-900 text-sm">{tenant.slug}</p>
+                </div>
 
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1">
-                <span className="text-slate-500 uppercase font-mono tracking-wider font-semibold">Full Portal Domain</span>
-                <p className="font-mono text-emerald-400 font-bold text-sm">{tenant.slug}.{domainName}</p>
+                <div className="bg-zinc-50 p-3 rounded-lg border border-zinc-200 space-y-1">
+                  <span className="text-zinc-500 uppercase font-mono font-medium text-[10px]">Full Portal Domain</span>
+                  <p className="font-mono font-semibold text-zinc-900 text-sm">{tenant.slug}.{domainName}</p>
+                </div>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
           {/* Profile Form */}
-          <form onSubmit={handleSaveSettings} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6 text-sm">
-            <div className="flex items-center space-x-3 text-indigo-400 border-b border-slate-800 pb-3">
-              <Building2 className="w-5 h-5" />
-              <h2 className="text-base font-bold text-white">Distributor Business Details</h2>
-            </div>
+          <form onSubmit={handleSaveSettings}>
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-zinc-700" />
+                  <CardTitle className="text-base">Distributor Business Details</CardTitle>
+                </div>
+              </CardHeader>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Distributor Display Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">Distributor Display Name *</label>
+                    <Input
+                      type="text"
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Registered Business / Legal Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. San Miguel Distribution Corp."
-                  value={businessName}
-                  onChange={(e) => setBusinessName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-            </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">Registered Business / Legal Name</label>
+                    <Input
+                      type="text"
+                      placeholder="e.g. San Miguel Distribution Corp."
+                      value={businessName}
+                      onChange={(e) => setBusinessName(e.target.value)}
+                    />
+                  </div>
+                </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Tax Identification Number (TIN)</label>
-                <input
-                  type="text"
-                  placeholder="000-123-456-000"
-                  value={taxId}
-                  onChange={(e) => setTaxId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 font-mono"
-                />
-              </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">Tax Identification Number (TIN)</label>
+                    <Input
+                      type="text"
+                      placeholder="000-123-456-000"
+                      value={taxId}
+                      onChange={(e) => setTaxId(e.target.value)}
+                      className="font-mono"
+                    />
+                  </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Contact Person Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Juan dela Cruz"
-                  value={contactName}
-                  onChange={(e) => setContactName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-            </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">Contact Person Name</label>
+                    <Input
+                      type="text"
+                      placeholder="e.g. Juan dela Cruz"
+                      value={contactName}
+                      onChange={(e) => setContactName(e.target.value)}
+                    />
+                  </div>
+                </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Contact Email</label>
-                <input
-                  type="email"
-                  placeholder="info@distributor.com"
-                  value={contactEmail}
-                  onChange={(e) => setContactEmail(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">Contact Email</label>
+                    <Input
+                      type="email"
+                      placeholder="info@distributor.com"
+                      value={contactEmail}
+                      onChange={(e) => setContactEmail(e.target.value)}
+                    />
+                  </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Contact Phone</label>
-                <input
-                  type="text"
-                  placeholder="+63 917 000 1122"
-                  value={contactPhone}
-                  onChange={(e) => setContactPhone(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-            </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">Contact Phone</label>
+                    <Input
+                      type="text"
+                      placeholder="+63 917 000 1122"
+                      value={contactPhone}
+                      onChange={(e) => setContactPhone(e.target.value)}
+                    />
+                  </div>
+                </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Physical Address / Main Warehouse Depot Location</label>
-              <textarea
-                rows={3}
-                placeholder="123 Industrial Highway, Mandaue City, Cebu"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
-              ></textarea>
-            </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Physical Address / Main Warehouse Depot Location</label>
+                  <Textarea
+                    rows={3}
+                    placeholder="123 Industrial Highway, Mandaue City, Cebu"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                  />
+                </div>
 
-            <div className="flex justify-end pt-4 border-t border-slate-800">
-              <button
-                type="submit"
-                disabled={saving}
-                className="px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center space-x-2 shadow-lg shadow-indigo-600/30 transition-all disabled:opacity-50"
-              >
-                {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                <span>{saving ? 'Saving Settings...' : 'Save Tenant Settings'}</span>
-              </button>
-            </div>
+                <div className="flex justify-end pt-3 border-t border-zinc-100">
+                  <Button
+                    type="submit"
+                    disabled={saving}
+                    className="gap-1.5"
+                  >
+                    {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    <span>{saving ? 'Saving...' : 'Save Settings'}</span>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </form>
         </div>
       )}

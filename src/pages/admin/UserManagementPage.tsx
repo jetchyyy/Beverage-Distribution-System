@@ -2,20 +2,37 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
+import { useModal } from '../../context/ModalContext';
 import type { Profile, UserRole } from '../../types/database.types';
 import {
-  Users,
   UserPlus,
   Shield,
   CheckSquare,
   Square,
   Edit2,
-  Lock,
-  CheckCircle,
-  XCircle,
   AlertCircle,
   Search,
 } from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Badge } from '../../components/ui/badge';
+import { Card, CardContent } from '../../components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '../../components/ui/dialog';
 
 export const FEATURE_CATALOG = [
   { key: 'dashboard', label: 'Dashboard', path: '/admin', description: 'Overview metrics & real-time distributor KPIs' },
@@ -36,6 +53,7 @@ export const FEATURE_CATALOG = [
 export const UserManagementPage: React.FC = () => {
   const { tenant } = useTenant();
   const { createSecondaryUser, profile: currentProfile } = useAuth();
+  const { showError, showSuccess, confirm } = useModal();
 
   const [staffUsers, setStaffUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -136,8 +154,14 @@ export const UserManagementPage: React.FC = () => {
       setNewRole('WAREHOUSE_STAFF');
       setSelectedFeatures(FEATURE_CATALOG.map((f) => f.key));
       fetchStaffUsers();
+      showSuccess({
+        title: 'User Created',
+        description: `Staff account for "${newFullName.trim()}" has been created successfully.`,
+      });
     } catch (err: any) {
-      setError(err.message || 'Failed to create staff account');
+      const msg = err.message || 'Failed to create staff account';
+      setError(msg);
+      showError({ title: 'Creation Failed', description: msg });
     } finally {
       setSaving(false);
     }
@@ -156,8 +180,15 @@ export const UserManagementPage: React.FC = () => {
 
       setEditingUser(null);
       fetchStaffUsers();
+      showSuccess({
+        title: 'Permissions Updated',
+        description: `Feature permissions for "${editingUser.full_name}" have been saved.`,
+      });
     } catch (err: any) {
-      alert(err.message || 'Failed to update permissions');
+      showError({
+        title: 'Update Failed',
+        description: err.message || 'Failed to update permissions.',
+      });
     } finally {
       setSaving(false);
     }
@@ -165,14 +196,27 @@ export const UserManagementPage: React.FC = () => {
 
   const toggleUserStatus = async (userToToggle: Profile) => {
     const newStatus = userToToggle.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    const actionLabel = newStatus === 'ACTIVE' ? 'activate' : 'deactivate';
+    const ok = await confirm({
+      title: `${newStatus === 'ACTIVE' ? 'Activate' : 'Deactivate'} User`,
+      description: `Are you sure you want to ${actionLabel} account "${userToToggle.full_name}"?`,
+      confirmText: newStatus === 'ACTIVE' ? 'Activate' : 'Deactivate',
+      variant: newStatus === 'ACTIVE' ? 'default' : 'destructive',
+    });
+    if (!ok) return;
+
     try {
       await supabase
         .from('profiles')
         .update({ status: newStatus, updated_at: new Date().toISOString() })
         .eq('id', userToToggle.id);
       fetchStaffUsers();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error toggling status:', err);
+      showError({
+        title: 'Status Update Failed',
+        description: err.message || 'Failed to update user status.',
+      });
     }
   };
 
@@ -186,61 +230,59 @@ export const UserManagementPage: React.FC = () => {
 
   const filteredUsers = staffUsers.filter(
     (u) =>
-      u.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.role.toLowerCase().includes(searchQuery.toLowerCase())
+      u.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.role?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-200 pb-5">
         <div>
-          <h1 className="text-2xl font-extrabold text-white flex items-center space-x-2">
-            <Users className="w-6 h-6 text-indigo-400" />
-            <span>Tenant User Management & Feature Access</span>
-          </h1>
-          <p className="text-slate-400 text-sm">
-            Create staff accounts for {tenant?.name || 'Distributor'} and configure custom feature permission checkboxes
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">User Management & Permissions</h1>
+          <p className="text-sm text-zinc-500 mt-1">
+            Manage staff accounts for {tenant?.name || 'Distributor'} and configure role permissions
           </p>
         </div>
 
-        <button
+        <Button
           onClick={() => setIsCreateModalOpen(true)}
-          className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center space-x-2 transition-all shadow-lg shadow-indigo-600/30 shrink-0"
+          className="gap-1.5 shrink-0"
         >
           <UserPlus className="w-4 h-4" />
           <span>Create Staff Account</span>
-        </button>
+        </Button>
       </div>
 
-      {/* Search & Filter Bar */}
-      <div className="flex items-center space-x-3 bg-slate-900 border border-slate-800 rounded-2xl p-3">
-        <Search className="w-4 h-4 text-slate-400 ml-1" />
-        <input
+      {/* Search Bar */}
+      <div className="relative w-full max-w-md">
+        <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-3" />
+        <Input
           type="text"
           placeholder="Search staff accounts by name, email or role..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full bg-transparent text-sm text-white placeholder-slate-500 focus:outline-none"
+          className="pl-9"
         />
       </div>
 
       {loading ? (
-        <div className="py-20 text-center text-slate-500 animate-pulse">Loading tenant staff accounts...</div>
+        <div className="py-20 text-center text-sm text-zinc-400">Loading staff accounts...</div>
       ) : (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-950 text-slate-400 uppercase text-xs font-semibold tracking-wider border-b border-slate-800">
-                <tr>
-                  <th className="px-5 py-4">User Details</th>
-                  <th className="px-5 py-4">Role</th>
-                  <th className="px-5 py-4">Feature Permissions</th>
-                  <th className="px-5 py-4">Status</th>
-                  <th className="px-5 py-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User Details</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Feature Permissions</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {filteredUsers.map((u) => {
                   const isSelf = u.id === currentProfile?.id;
                   const isTenantAdminUser = u.role === 'TENANT_ADMIN' || u.role === 'SUPERADMIN';
@@ -249,289 +291,188 @@ export const UserManagementPage: React.FC = () => {
                     : FEATURE_CATALOG.map((f) => f.key);
 
                   return (
-                    <tr key={u.id} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="px-5 py-4">
-                        <div className="font-bold text-white text-sm">{u.full_name}</div>
-                        <div className="text-xs text-slate-400 font-mono">{u.email}</div>
-                      </td>
-                      <td className="px-5 py-4">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase font-mono border ${
-                          isTenantAdminUser
-                            ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
-                            : u.role === 'WAREHOUSE_STAFF'
-                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                            : u.role === 'AGENT'
-                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                            : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
-                        }`}>
-                          <Shield className="w-3 h-3 mr-1" />
+                    <TableRow key={u.id}>
+                      <TableCell>
+                        <div className="font-semibold text-zinc-900 text-sm">{u.full_name}</div>
+                        <div className="text-xs text-zinc-400 font-mono">{u.email}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="font-mono text-xs uppercase">
+                          <Shield className="w-3 h-3 mr-1 text-zinc-600" />
                           {u.role.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
                         {isTenantAdminUser ? (
-                          <span className="text-xs text-emerald-400 font-mono font-bold">
-                            Full Access (12/12 Features)
+                          <span className="text-xs text-zinc-600 font-medium">
+                            Full Access (All Features)
                           </span>
                         ) : (
                           <div className="flex flex-wrap gap-1 max-w-md">
                             {FEATURE_CATALOG.map((feat) => {
                               const hasIt = allowedList.includes(feat.key);
                               return (
-                                <span
+                                <Badge
                                   key={feat.key}
-                                  className={`text-[9px] font-mono px-2 py-0.5 rounded font-bold uppercase border ${
-                                    hasIt
-                                      ? 'bg-indigo-950 text-indigo-300 border-indigo-700/60'
-                                      : 'bg-slate-950 text-slate-600 border-slate-800 line-through opacity-50'
-                                  }`}
+                                  variant={hasIt ? "secondary" : "outline"}
+                                  className={`text-[10px] px-1.5 py-0 ${!hasIt ? 'opacity-40 line-through' : ''}`}
                                 >
                                   {feat.label.split(' ')[0]}
-                                </span>
+                                </Badge>
                               );
                             })}
                           </div>
                         )}
-                      </td>
-                      <td className="px-5 py-4">
-                        {u.status === 'ACTIVE' ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                            <CheckCircle className="w-3 h-3 mr-1" />
-                            ACTIVE
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
-                            <XCircle className="w-3 h-3 mr-1" />
-                            INACTIVE
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="flex items-center justify-end space-x-2">
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={u.status === 'ACTIVE' ? 'default' : 'secondary'} className="text-xs">
+                          {u.status === 'ACTIVE' ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
                           {!isTenantAdminUser && (
-                            <button
+                            <Button
+                              variant="outline"
+                              size="sm"
                               onClick={() => openEditModal(u)}
-                              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 font-bold text-xs flex items-center space-x-1 border border-slate-700"
+                              className="h-8 gap-1 text-xs"
                             >
-                              <Edit2 className="w-3.5 h-3.5" />
-                              <span>Edit Permissions</span>
-                            </button>
+                              <Edit2 className="w-3 h-3" />
+                              <span>Permissions</span>
+                            </Button>
                           )}
 
                           {!isSelf && !isTenantAdminUser && (
-                            <button
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               onClick={() => toggleUserStatus(u)}
-                              className={`px-2.5 py-1.5 rounded-xl font-bold text-xs ${
-                                u.status === 'ACTIVE'
-                                  ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                                  : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                              }`}
+                              className={`h-8 text-xs ${u.status === 'ACTIVE' ? 'text-red-600 hover:text-red-700' : 'text-zinc-900'}`}
                             >
                               {u.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
-                            </button>
+                            </Button>
                           )}
                         </div>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       )}
 
       {/* Create Staff Account Modal */}
-      {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 shadow-2xl text-slate-100 space-y-4 my-8">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="font-extrabold text-lg text-white flex items-center space-x-2">
-                <UserPlus className="w-5 h-5 text-indigo-400" />
-                <span>Create Staff Account & Assign Permissions</span>
-              </h3>
-              <button onClick={() => setIsCreateModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+      <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create Staff Account</DialogTitle>
+            <DialogDescription>
+              Assign login credentials and specific module permissions.
+            </DialogDescription>
+          </DialogHeader>
+
+          {error && (
+            <div className="p-3 bg-red-50 text-red-600 text-xs rounded-lg flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
             </div>
+          )}
 
-            {error && (
-              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleCreateStaffAccount} className="space-y-4 text-sm">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Full Name *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Maria Santos"
-                    value={newFullName}
-                    onChange={(e) => setNewFullName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Email Address *</label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="staff@distributor.com"
-                    value={newEmail}
-                    onChange={(e) => setNewEmail(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Password *</label>
-                  <input
-                    type="password"
-                    required
-                    minLength={6}
-                    placeholder="Min 6 characters"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">System Role *</label>
-                  <select
-                    value={newRole}
-                    onChange={(e) => setNewRole(e.target.value as UserRole)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="WAREHOUSE_STAFF">Warehouse Staff</option>
-                    <option value="ACCOUNTING_REPORT">Accounting / Cashier</option>
-                    <option value="AGENT">Route Delivery Agent</option>
-                    <option value="TENANT_ADMIN">Tenant Admin (Full Access)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Feature Permissions Checkbox Grid */}
-              <div className="space-y-2 pt-2 border-t border-slate-800">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-extrabold text-indigo-300 uppercase tracking-wider">
-                    Feature Access Permissions (Sidebar Pages)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleSelectAllCreate}
-                    className="text-xs text-indigo-400 hover:underline font-bold"
-                  >
-                    {selectedFeatures.length === FEATURE_CATALOG.length ? 'Deselect All' : 'Select All'}
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-950 p-3 rounded-2xl border border-slate-800 max-h-56 overflow-y-auto">
-                  {FEATURE_CATALOG.map((feat) => {
-                    const isChecked = selectedFeatures.includes(feat.key);
-
-                    return (
-                      <div
-                        key={feat.key}
-                        onClick={() => toggleFeatureInCreate(feat.key)}
-                        className={`flex items-start space-x-2.5 p-2 rounded-xl cursor-pointer transition-all border ${
-                          isChecked
-                            ? 'bg-indigo-950/60 border-indigo-500/40 text-white'
-                            : 'bg-slate-900/40 border-slate-800/80 text-slate-400 hover:bg-slate-900'
-                        }`}
-                      >
-                        {isChecked ? (
-                          <CheckSquare className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" />
-                        ) : (
-                          <Square className="w-4 h-4 text-slate-600 mt-0.5 shrink-0" />
-                        )}
-                        <div>
-                          <div className="text-xs font-bold">{feat.label}</div>
-                          <div className="text-[10px] text-slate-500 leading-tight">{feat.description}</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-slate-800 flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setIsCreateModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="px-5 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-500 disabled:opacity-50 shadow-lg shadow-indigo-600/30"
-                >
-                  {saving ? 'Creating Account...' : 'Confirm & Create Account'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Permissions Modal */}
-      {editingUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl text-slate-100 space-y-4 my-8">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <form onSubmit={handleCreateStaffAccount} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <h3 className="font-extrabold text-lg text-white flex items-center space-x-2">
-                  <Lock className="w-5 h-5 text-indigo-400" />
-                  <span>Edit Feature Permissions</span>
-                </h3>
-                <p className="text-xs text-slate-400 font-mono mt-0.5">{editingUser.full_name} ({editingUser.email})</p>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Full Name *</label>
+                <Input
+                  type="text"
+                  required
+                  placeholder="e.g. Maria Santos"
+                  value={newFullName}
+                  onChange={(e) => setNewFullName(e.target.value)}
+                />
               </div>
-              <button onClick={() => setEditingUser(null)} className="text-slate-400 hover:text-white">✕</button>
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Email Address *</label>
+                <Input
+                  type="email"
+                  required
+                  placeholder="staff@distributor.com"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                />
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="block text-xs font-extrabold text-indigo-300 uppercase tracking-wider">
-                  Allowed Features Checkboxes
-                </label>
-                <button
-                  type="button"
-                  onClick={handleSelectAllEdit}
-                  className="text-xs text-indigo-400 hover:underline font-bold"
-                >
-                  {editFeatures.length === FEATURE_CATALOG.length ? 'Deselect All' : 'Select All'}
-                </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Password *</label>
+                <Input
+                  type="password"
+                  required
+                  minLength={6}
+                  placeholder="Min 6 characters"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-950 p-3 rounded-2xl border border-slate-800 max-h-64 overflow-y-auto">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">System Role *</label>
+                <select
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value as UserRole)}
+                  className="w-full bg-white border border-zinc-200 rounded-lg px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+                >
+                  <option value="WAREHOUSE_STAFF">Warehouse Staff</option>
+                  <option value="ACCOUNTING_REPORT">Accounting / Cashier</option>
+                  <option value="AGENT">Route Delivery Agent</option>
+                  <option value="TENANT_ADMIN">Tenant Admin (Full Access)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Feature Permissions Checkbox Grid */}
+            <div className="space-y-2 pt-2 border-t border-zinc-200">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-zinc-900 uppercase tracking-wider">
+                  Feature Permissions
+                </label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleSelectAllCreate}
+                  className="h-7 text-xs"
+                >
+                  {selectedFeatures.length === FEATURE_CATALOG.length ? 'Deselect All' : 'Select All'}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-zinc-50 p-3 rounded-lg border border-zinc-200 max-h-56 overflow-y-auto">
                 {FEATURE_CATALOG.map((feat) => {
-                  const isChecked = editFeatures.includes(feat.key);
+                  const isChecked = selectedFeatures.includes(feat.key);
 
                   return (
                     <div
                       key={feat.key}
-                      onClick={() => toggleFeatureInEdit(feat.key)}
-                      className={`flex items-start space-x-2.5 p-2.5 rounded-xl cursor-pointer transition-all border ${
+                      onClick={() => toggleFeatureInCreate(feat.key)}
+                      className={`flex items-start gap-2 p-2 rounded-md cursor-pointer transition-all border ${
                         isChecked
-                          ? 'bg-indigo-950/60 border-indigo-500/40 text-white'
-                          : 'bg-slate-900/40 border-slate-800/80 text-slate-400 hover:bg-slate-900'
+                          ? 'bg-white border-zinc-300 text-zinc-900 shadow-xs'
+                          : 'border-transparent text-zinc-500 hover:bg-zinc-100'
                       }`}
                     >
                       {isChecked ? (
-                        <CheckSquare className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" />
+                        <CheckSquare className="w-4 h-4 text-zinc-900 mt-0.5 shrink-0" />
                       ) : (
-                        <Square className="w-4 h-4 text-slate-600 mt-0.5 shrink-0" />
+                        <Square className="w-4 h-4 text-zinc-400 mt-0.5 shrink-0" />
                       )}
                       <div>
-                        <div className="text-xs font-bold">{feat.label}</div>
-                        <div className="text-[10px] text-slate-500 leading-tight">{feat.description}</div>
+                        <div className="text-xs font-semibold">{feat.label}</div>
+                        <div className="text-[10px] text-zinc-500 leading-tight">{feat.description}</div>
                       </div>
                     </div>
                   );
@@ -539,26 +480,85 @@ export const UserManagementPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="pt-3 border-t border-slate-800 flex justify-end space-x-3">
-              <button
-                type="button"
-                onClick={() => setEditingUser(null)}
-                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700"
-              >
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsCreateModalOpen(false)}>
                 Cancel
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={handleSavePermissions}
-                className="px-5 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-500 disabled:opacity-50 shadow-lg shadow-indigo-600/30"
-              >
-                {saving ? 'Saving...' : 'Save Permissions'}
-              </button>
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? 'Creating...' : 'Create Account'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Permissions Modal */}
+      <Dialog open={!!editingUser} onOpenChange={(open) => !open && setEditingUser(null)}>
+        {editingUser && (
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Feature Permissions</DialogTitle>
+              <DialogDescription>
+                {editingUser.full_name} ({editingUser.email})
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-zinc-900 uppercase tracking-wider">
+                  Allowed Modules
+                </label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleSelectAllEdit}
+                  className="h-7 text-xs"
+                >
+                  {editFeatures.length === FEATURE_CATALOG.length ? 'Deselect All' : 'Select All'}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-zinc-50 p-3 rounded-lg border border-zinc-200 max-h-64 overflow-y-auto">
+                {FEATURE_CATALOG.map((feat) => {
+                  const isChecked = editFeatures.includes(feat.key);
+
+                  return (
+                    <div
+                      key={feat.key}
+                      onClick={() => toggleFeatureInEdit(feat.key)}
+                      className={`flex items-start gap-2 p-2 rounded-md cursor-pointer transition-all border ${
+                        isChecked
+                          ? 'bg-white border-zinc-300 text-zinc-900 shadow-xs'
+                          : 'border-transparent text-zinc-500 hover:bg-zinc-100'
+                      }`}
+                    >
+                      {isChecked ? (
+                        <CheckSquare className="w-4 h-4 text-zinc-900 mt-0.5 shrink-0" />
+                      ) : (
+                        <Square className="w-4 h-4 text-zinc-400 mt-0.5 shrink-0" />
+                      )}
+                      <div>
+                        <div className="text-xs font-semibold">{feat.label}</div>
+                        <div className="text-[10px] text-zinc-500 leading-tight">{feat.description}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditingUser(null)}>
+                Cancel
+              </Button>
+              <Button disabled={saving} onClick={handleSavePermissions}>
+                {saving ? 'Saving...' : 'Save Permissions'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 };

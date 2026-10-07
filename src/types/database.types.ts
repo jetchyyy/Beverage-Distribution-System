@@ -106,6 +106,7 @@ export interface ReturnableItem {
   unit?: string;
   deposit_rate: number;
   pundo_value?: number;
+  product_id?: string | null;
   is_active: boolean;
   created_at: string;
 }

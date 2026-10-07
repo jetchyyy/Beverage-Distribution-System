@@ -13,6 +13,8 @@ import {
   Coins,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
 
 export const AdminDashboard: React.FC = () => {
   const { tenant } = useTenant();
@@ -114,224 +116,249 @@ export const AdminDashboard: React.FC = () => {
 
   if (!isSupabaseConfigured) {
     return (
-      <div className="p-8 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-200">
-        <div className="flex items-center space-x-3 mb-2">
-          <AlertCircle className="w-6 h-6 text-amber-400" />
-          <h3 className="text-lg font-bold">Supabase Credentials Required</h3>
-        </div>
-        <p className="text-sm">
-          Please add your <code className="font-mono bg-slate-900 px-2 py-1 rounded">VITE_SUPABASE_URL</code> and{' '}
-          <code className="font-mono bg-slate-900 px-2 py-1 rounded">VITE_SUPABASE_ANON_KEY</code> to environment variables or `.env` file to connect to live Supabase data.
-        </p>
-      </div>
+      <Card className="border-zinc-200">
+        <CardContent className="p-6">
+          <div className="flex items-center space-x-3 mb-2">
+            <AlertCircle className="w-5 h-5 text-zinc-900" />
+            <h3 className="text-base font-semibold text-zinc-900">Supabase Credentials Required</h3>
+          </div>
+          <p className="text-sm text-zinc-600">
+            Please add your <code className="font-mono bg-zinc-100 px-1.5 py-0.5 rounded text-zinc-900 border border-zinc-200">VITE_SUPABASE_URL</code> and{' '}
+            <code className="font-mono bg-zinc-100 px-1.5 py-0.5 rounded text-zinc-900 border border-zinc-200">VITE_SUPABASE_ANON_KEY</code> to environment variables or `.env` file to connect to live Supabase data.
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800 pb-6">
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-zinc-200 pb-5">
         <div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-white">
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-zinc-900">
             {tenant ? tenant.name : 'Distributor Operations'}
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
-            Real-time Inventory, Delivery, Agent Truck & Returnables PUNDO Dashboard
+          <p className="text-zinc-500 text-xs sm:text-sm mt-0.5">
+            Real-time Inventory, Delivery, Fleet & PUNDO Dashboard
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Link
-            to="/admin/products"
-            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center space-x-1.5 border border-slate-700"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add Product</span>
-          </Link>
-          <Link
-            to="/admin/transfers"
-            className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-md shadow-indigo-600/20"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>New Stock Transfer</span>
-          </Link>
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/admin/products" className="flex items-center space-x-1.5">
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Product</span>
+            </Link>
+          </Button>
+          <Button size="sm" asChild>
+            <Link to="/admin/transfers" className="flex items-center space-x-1.5">
+              <Plus className="w-3.5 h-3.5" />
+              <span>New Stock Transfer</span>
+            </Link>
+          </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs uppercase font-mono tracking-wider font-semibold text-slate-400">
-              Today's Sales
-            </span>
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <ShoppingBag className="w-5 h-5" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                Today's Sales
+              </span>
+              <div className="p-2 rounded-md bg-zinc-100 text-zinc-900 border border-zinc-200">
+                <ShoppingBag className="w-4 h-4" />
+              </div>
             </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-white">₱{todaySalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-            <div className="text-xs text-slate-500 mt-1">{todaySalesCount} deliveries completed today</div>
-          </div>
-        </div>
+            <div className="mt-3">
+              <div className="text-2xl font-bold tracking-tight text-zinc-900">
+                ₱{todaySalesTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">{todaySalesCount} deliveries completed today</div>
+            </div>
+          </CardContent>
+        </Card>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs uppercase font-mono tracking-wider font-semibold text-slate-400">
-              Outstanding PUNDO
-            </span>
-            <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-              <Coins className="w-5 h-5" />
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                Outstanding PUNDO
+              </span>
+              <div className="p-2 rounded-md bg-zinc-100 text-zinc-900 border border-zinc-200">
+                <Coins className="w-4 h-4" />
+              </div>
             </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-amber-300">₱{totalPundoValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-            <div className="text-xs text-slate-500 mt-1">Unreturned bottle & case deposit value</div>
-          </div>
-        </div>
+            <div className="mt-3">
+              <div className="text-2xl font-bold tracking-tight text-zinc-900">
+                ₱{totalPundoValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">Unreturned bottle & case deposit value</div>
+            </div>
+          </CardContent>
+        </Card>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs uppercase font-mono tracking-wider font-semibold text-slate-400">
-              Warehouse Stock
-            </span>
-            <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-              <WarehouseIcon className="w-5 h-5" />
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                Warehouse Stock
+              </span>
+              <div className="p-2 rounded-md bg-zinc-100 text-zinc-900 border border-zinc-200">
+                <WarehouseIcon className="w-4 h-4" />
+              </div>
             </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-white">{warehouseStock.toLocaleString()} <span className="text-sm font-normal text-slate-400">cases</span></div>
-            <div className="text-xs text-slate-500 mt-1">{productCount} active registered products</div>
-          </div>
-        </div>
+            <div className="mt-3">
+              <div className="text-2xl font-bold tracking-tight text-zinc-900">
+                {warehouseStock.toLocaleString()} <span className="text-xs font-normal text-zinc-500">cases</span>
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">{productCount} active registered products</div>
+            </div>
+          </CardContent>
+        </Card>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs uppercase font-mono tracking-wider font-semibold text-slate-400">
-              Truck Stock
-            </span>
-            <div className="p-2.5 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-              <Truck className="w-5 h-5" />
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                Truck Fleet Stock
+              </span>
+              <div className="p-2 rounded-md bg-zinc-100 text-zinc-900 border border-zinc-200">
+                <Truck className="w-4 h-4" />
+              </div>
             </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-white">{truckStock.toLocaleString()} <span className="text-sm font-normal text-slate-400">cases</span></div>
-            <div className="text-xs text-slate-500 mt-1">{activeAgents} agents / {activeTrucks} trucks</div>
-          </div>
-        </div>
+            <div className="mt-3">
+              <div className="text-2xl font-bold tracking-tight text-zinc-900">
+                {truckStock.toLocaleString()} <span className="text-xs font-normal text-zinc-500">cases</span>
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">{activeAgents} agents / {activeTrucks} trucks</div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6">
-          <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
-            <h3 className="font-bold text-white text-lg">Recent Store Deliveries</h3>
-            <Link to="/admin/sales" className="text-xs font-semibold text-indigo-400 hover:underline flex items-center space-x-1">
-              <span>View All</span>
-              <ArrowUpRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-
-          {loading ? (
-            <div className="py-12 text-center text-slate-500 text-xs animate-pulse">Loading transaction records...</div>
-          ) : recentSales.length === 0 ? (
-            <div className="py-12 text-center text-slate-500 text-sm">
-              <ShoppingBag className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
-              <p>No sales or deliveries recorded yet today.</p>
-              <p className="text-xs text-slate-600 mt-1">When agents complete deliveries on their mobile tablet, transactions will appear here live.</p>
+        <Card className="lg:col-span-2">
+          <CardHeader className="flex flex-row items-center justify-between pb-3 border-b border-zinc-100">
+            <div>
+              <CardTitle className="text-base font-semibold">Recent Store Deliveries</CardTitle>
             </div>
-          ) : (
-            <div className="divide-y divide-slate-800">
-              {recentSales.map((s) => (
-                <div key={s.id} className="py-3 flex items-center justify-between hover:bg-slate-800/40 px-2 rounded-xl transition-colors">
-                  <div>
-                    <div className="font-semibold text-white text-sm">{s.micro_stores?.store_name || 'Micro Store'}</div>
-                    <div className="text-xs text-slate-500">
-                      Ref: <span className="font-mono text-slate-400">{s.sale_number}</span> • Agent: {s.agents?.full_name || 'Agent'}
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/admin/sales" className="text-xs font-medium text-zinc-700 flex items-center space-x-1">
+                <span>View All</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </Link>
+            </Button>
+          </CardHeader>
+
+          <CardContent className="p-4">
+            {loading ? (
+              <div className="py-12 text-center text-zinc-400 text-xs animate-pulse">Loading transaction records...</div>
+            ) : recentSales.length === 0 ? (
+              <div className="py-10 text-center text-zinc-500 text-sm">
+                <ShoppingBag className="w-8 h-8 text-zinc-300 mx-auto mb-2" />
+                <p className="font-medium text-zinc-700">No deliveries recorded today</p>
+                <p className="text-xs text-zinc-400 mt-0.5">When agents complete sales on mobile, transactions will appear live.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-zinc-100">
+                {recentSales.map((s) => (
+                  <div key={s.id} className="py-3 flex items-center justify-between hover:bg-zinc-50 px-2 rounded-md transition-colors">
+                    <div>
+                      <div className="font-medium text-zinc-900 text-sm">{s.micro_stores?.store_name || 'Micro Store'}</div>
+                      <div className="text-xs text-zinc-500">
+                        Ref: <span className="font-mono text-zinc-700 font-medium">{s.sale_number}</span> • Agent: {s.agents?.full_name || 'Agent'}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-semibold text-zinc-900 text-sm">₱{Number(s.total).toFixed(2)}</div>
+                      <div className="text-[10px] text-zinc-400">{new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="font-bold text-emerald-400 text-sm">₱{Number(s.total).toFixed(2)}</div>
-                    <div className="text-[10px] text-slate-500">{new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3 border-b border-zinc-100">
+            <CardTitle className="text-base font-semibold">Distributor Summary</CardTitle>
+          </CardHeader>
+
+          <CardContent className="p-5 space-y-5">
+            <div className="bg-zinc-50 p-3.5 rounded-lg border border-zinc-200 space-y-2.5">
+              <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-zinc-700">
+                <span>Stock Breakdown</span>
+                <Link to="/admin/warehouse" className="text-zinc-900 hover:underline font-medium">View Depot</Link>
+              </div>
+
+              <div className="space-y-1.5 text-xs">
+                <div className="flex justify-between items-center bg-white p-2 rounded-md border border-zinc-200">
+                  <span className="text-zinc-600 flex items-center gap-1.5">
+                    <WarehouseIcon className="w-3.5 h-3.5 text-zinc-500" />
+                    Warehouse Depot:
+                  </span>
+                  <span className="font-semibold text-zinc-900">{warehouseStock.toLocaleString()} cs</span>
+                </div>
+
+                <div className="flex justify-between items-center bg-white p-2 rounded-md border border-zinc-200">
+                  <span className="text-zinc-600 flex items-center gap-1.5">
+                    <Truck className="w-3.5 h-3.5 text-zinc-500" />
+                    Truck Fleet:
+                  </span>
+                  <span className="font-semibold text-zinc-900">{truckStock.toLocaleString()} cs</span>
+                </div>
+
+                <div className="flex justify-between items-center bg-zinc-900 p-2 rounded-md text-white font-medium">
+                  <span className="text-zinc-200">Total System Stock:</span>
+                  <span className="text-white font-semibold">{(warehouseStock + truckStock).toLocaleString()} cs</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between p-2.5 rounded-md bg-white border border-zinc-200">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-1.5 rounded-md bg-zinc-100 text-zinc-700">
+                    <Users className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-zinc-500">Route Agents</p>
+                    <p className="text-xs font-semibold text-zinc-900">{activeAgents} active</p>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-          <h3 className="font-bold text-white text-lg border-b border-slate-800 pb-3">Distributor Summary</h3>
-
-          {/* Live Warehouse & Fleet Breakdown */}
-          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
-            <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-300">
-              <span>Inventory Allocation</span>
-              <Link to="/admin/warehouse" className="text-indigo-400 hover:underline">View Depot</Link>
-            </div>
-
-            <div className="space-y-2 text-xs font-mono">
-              <div className="flex justify-between items-center bg-slate-900 p-2.5 rounded-lg border border-slate-800">
-                <span className="text-slate-400 flex items-center gap-1.5">
-                  <WarehouseIcon className="w-3.5 h-3.5 text-indigo-400" />
-                  Main Warehouse Depot:
-                </span>
-                <span className="font-bold text-emerald-400 text-sm">{warehouseStock.toLocaleString()} cs</span>
+                <Link to="/admin/agents-trucks" className="text-xs text-zinc-600 hover:text-zinc-900 font-medium">Manage</Link>
               </div>
 
-              <div className="flex justify-between items-center bg-slate-900 p-2.5 rounded-lg border border-slate-800">
-                <span className="text-slate-400 flex items-center gap-1.5">
-                  <Truck className="w-3.5 h-3.5 text-cyan-400" />
-                  Loaded on Truck Fleet:
-                </span>
-                <span className="font-bold text-cyan-400 text-sm">{truckStock.toLocaleString()} cs</span>
+              <div className="flex items-center justify-between p-2.5 rounded-md bg-white border border-zinc-200">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-1.5 rounded-md bg-zinc-100 text-zinc-700">
+                    <Truck className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-zinc-500">Delivery Trucks</p>
+                    <p className="text-xs font-semibold text-zinc-900">{activeTrucks} units</p>
+                  </div>
+                </div>
+                <Link to="/admin/agents-trucks" className="text-xs text-zinc-600 hover:text-zinc-900 font-medium">Manage</Link>
               </div>
 
-              <div className="flex justify-between items-center bg-indigo-950/40 p-2.5 rounded-lg border border-indigo-500/30 text-white font-bold">
-                <span className="text-indigo-300">Total System Stock:</span>
-                <span className="text-white text-sm">{(warehouseStock + truckStock).toLocaleString()} cs</span>
+              <div className="flex items-center justify-between p-2.5 rounded-md bg-white border border-zinc-200">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-1.5 rounded-md bg-zinc-100 text-zinc-700">
+                    <Store className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-zinc-500">Micro Store Accounts</p>
+                    <p className="text-xs font-semibold text-zinc-900">{activeStores} stores</p>
+                  </div>
+                </div>
+                <Link to="/admin/stores" className="text-xs text-zinc-600 hover:text-zinc-900 font-medium">Manage</Link>
               </div>
             </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
-                  <Users className="w-4 h-4" />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-slate-400">Active Route Agents</p>
-                  <p className="text-sm font-bold text-white">{activeAgents} registered</p>
-                </div>
-              </div>
-              <Link to="/admin/agents-trucks" className="text-xs text-indigo-400 hover:underline">Manage</Link>
-            </div>
-
-            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400">
-                  <Truck className="w-4 h-4" />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-slate-400">Delivery Trucks</p>
-                  <p className="text-sm font-bold text-white">{activeTrucks} active units</p>
-                </div>
-              </div>
-              <Link to="/admin/agents-trucks" className="text-xs text-indigo-400 hover:underline">Manage</Link>
-            </div>
-
-            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
-                  <Store className="w-4 h-4" />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-slate-400">Micro Store Accounts</p>
-                  <p className="text-sm font-bold text-white">{activeStores} stores served</p>
-                </div>
-              </div>
-              <Link to="/admin/stores" className="text-xs text-indigo-400 hover:underline">Manage</Link>
-            </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

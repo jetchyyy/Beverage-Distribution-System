@@ -1,12 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
+import { useModal } from '../../context/ModalContext';
 import type { Product, ProductBatch, ProductPackaging, ProductPrice, Truck, Agent, AdjustmentReason } from '../../types/database.types';
-import { Plus, AlertTriangle, Layers, Calendar, Printer, ChevronDown, ChevronRight, Package, RotateCcw, Truck as TruckIcon, User, ShieldCheck } from 'lucide-react';
+import { Plus, AlertTriangle, Layers, Calendar, Printer, ChevronDown, ChevronRight, Package, RotateCcw, Truck as TruckIcon, User, ShieldCheck, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { Card, CardContent } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Badge } from '../../components/ui/badge';
+import { Input } from '../../components/ui/input';
 
 export const WarehousePage: React.FC = () => {
   const { tenant } = useTenant();
+  const { showError, showSuccess } = useModal();
 
   const [activeTab, setActiveTab] = useState<'OVERALL_SKU' | 'FIFO_BATCHES' | 'TRUCK_FLEET' | 'RETURNABLES'>('OVERALL_SKU');
   const [products, setProducts] = useState<Product[]>([]);
@@ -206,13 +212,14 @@ export const WarehousePage: React.FC = () => {
 
       setIsStockInModalOpen(false);
       await fetchInventoryData();
+      showSuccess({ title: 'Stock-In Complete', description: 'Batch recorded and added to warehouse inventory.' });
 
       const targetProd = products.find((p) => p.id === stockInProductId);
       if (newBatch && targetProd) {
         setPrintingBatch({ batch: newBatch, product: targetProd });
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to complete stock-in.');
+      showError({ title: 'Stock-In Failed', description: err.message || 'Failed to complete stock-in.' });
     } finally {
       setSavingStockIn(false);
     }
@@ -237,7 +244,6 @@ export const WarehousePage: React.FC = () => {
           .eq('id', existingInv.id);
       }
 
-      // Sync product_batches remaining_quantity on manual adjustment
       if (deltaQty < 0) {
         let remainingToDeduct = Math.abs(deltaQty);
         const prodBatches = batches.filter((b) => b.product_id === selectedProdId && Number(b.remaining_quantity || 0) > 0);
@@ -267,14 +273,14 @@ export const WarehousePage: React.FC = () => {
       setDeltaQty(0);
       setAdjNotes('');
       fetchInventoryData();
+      showSuccess({ title: 'Adjustment Recorded', description: 'Inventory balances have been successfully adjusted.' });
     } catch (err: any) {
-      alert(err.message || 'Adjustment failed');
+      showError({ title: 'Adjustment Failed', description: err.message || 'Failed to record stock adjustment.' });
     } finally {
       setSavingAdj(false);
     }
   };
 
-  // Aggregated Overall SKU Summaries
   const overallSkuSummaries = products.map((p) => {
     const prodBatches = batches.filter((b) => b.product_id === p.id);
     const prodPack = packagings.find((pk) => pk.product_id === p.id);
@@ -283,7 +289,6 @@ export const WarehousePage: React.FC = () => {
     const unitsPerCase = prodPack?.units_per_package || 24;
     const casePrice = prodPrice?.case_price || prodPrice?.price || 0;
 
-    // Use ground truth warehouse location balance from inventory_balances
     const inv = inventoryBalances.find((b) => b.product_id === p.id && b.locations?.type === 'WAREHOUSE');
     let totalCases = Number(inv?.quantity ?? -1);
 
@@ -310,7 +315,6 @@ export const WarehousePage: React.FC = () => {
     };
   });
 
-  // Calculate Truck Fleet Inventory Summaries
   const truckFleetSummaries = trucks.map((trk) => {
     const assignedAgent = agents.find((a) => a.assigned_truck_id === trk.id);
     const truckItems = inventoryBalances.filter((inv) => inv.location_id === trk.location_id && Number(inv.quantity) > 0);
@@ -356,465 +360,467 @@ export const WarehousePage: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-200 pb-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-white">Main Depot Warehouse Inventory</h1>
-          <p className="text-slate-400 text-sm">Overall SKU inventory breakdown, truck fleet inventory & stock management</p>
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-zinc-900">Main Depot Warehouse Inventory</h1>
+          <p className="text-zinc-500 text-xs sm:text-sm mt-0.5">Overall SKU inventory breakdown, truck fleet inventory & stock management</p>
         </div>
 
-        <div className="flex items-center space-x-3">
-          <button
+        <div className="flex items-center space-x-2">
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setIsAdjModalOpen(true)}
-            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold border border-slate-700 flex items-center space-x-2 transition-all"
+            className="flex items-center space-x-1.5"
           >
-            <AlertTriangle className="w-4 h-4 text-amber-400" />
-            <span>Manual Stock Adjustment</span>
-          </button>
+            <AlertTriangle className="w-3.5 h-3.5 text-zinc-700" />
+            <span>Stock Adjustment</span>
+          </Button>
 
-          <button
+          <Button
+            size="sm"
             onClick={() => openStockInModal()}
-            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold flex items-center space-x-2 transition-all shadow-lg shadow-emerald-600/30"
+            className="flex items-center space-x-1.5"
           >
-            <Plus className="w-4 h-4" />
-            <span>+ Stock In (Receive New Batch)</span>
-          </button>
+            <Plus className="w-3.5 h-3.5" />
+            <span>Stock In Batch</span>
+          </Button>
         </div>
       </div>
 
-      {/* KPI Cards Header */}
+      {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-1">
-          <span className="text-xs font-mono text-slate-400 uppercase">Warehouse Depot Cases</span>
-          <div className="text-2xl font-black text-emerald-400 font-mono">
-            {grandTotalWarehouseCases.toLocaleString()} <span className="text-sm text-slate-500">cases</span>
-          </div>
-        </div>
+        <Card>
+          <CardContent className="p-4 space-y-1">
+            <span className="text-xs text-zinc-500 uppercase font-medium">Depot Cases</span>
+            <div className="text-xl font-bold text-zinc-900">
+              {grandTotalWarehouseCases.toLocaleString()} <span className="text-xs text-zinc-500 font-normal">cases</span>
+            </div>
+          </CardContent>
+        </Card>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-1">
-          <span className="text-xs font-mono text-slate-400 uppercase">Loaded on Trucks Fleet</span>
-          <div className="text-2xl font-black text-cyan-400 font-mono">
-            {grandTotalTruckCases.toLocaleString()} <span className="text-sm text-slate-500">cases</span>
-          </div>
-        </div>
+        <Card>
+          <CardContent className="p-4 space-y-1">
+            <span className="text-xs text-zinc-500 uppercase font-medium">Trucks Fleet Cases</span>
+            <div className="text-xl font-bold text-zinc-900">
+              {grandTotalTruckCases.toLocaleString()} <span className="text-xs text-zinc-500 font-normal">cases</span>
+            </div>
+          </CardContent>
+        </Card>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-1">
-          <span className="text-xs font-mono text-slate-400 uppercase">Depot Asset Valuation</span>
-          <div className="text-2xl font-black text-indigo-400 font-mono">
-            ₱{grandTotalWarehouseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-        </div>
+        <Card>
+          <CardContent className="p-4 space-y-1">
+            <span className="text-xs text-zinc-500 uppercase font-medium">Depot Valuation</span>
+            <div className="text-xl font-bold text-zinc-900">
+              ₱{grandTotalWarehouseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+          </CardContent>
+        </Card>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-1">
-          <span className="text-xs font-mono text-slate-400 uppercase">Active FIFO Batch Lots</span>
-          <div className="text-2xl font-black text-amber-400 font-mono">
-            {batches.length} <span className="text-sm text-slate-500">batches</span>
-          </div>
-        </div>
+        <Card>
+          <CardContent className="p-4 space-y-1">
+            <span className="text-xs text-zinc-500 uppercase font-medium">FIFO Batches</span>
+            <div className="text-xl font-bold text-zinc-900">
+              {batches.length} <span className="text-xs text-zinc-500 font-normal">lots</span>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* View Switcher Tabs */}
-      <div className="flex items-center space-x-2 border-b border-slate-800 pb-2 overflow-x-auto">
-        <button
+      <div className="flex items-center space-x-1.5 border-b border-zinc-200 pb-2 overflow-x-auto">
+        <Button
+          variant={activeTab === 'OVERALL_SKU' ? 'default' : 'ghost'}
+          size="sm"
           onClick={() => setActiveTab('OVERALL_SKU')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 shrink-0 ${
-            activeTab === 'OVERALL_SKU'
-              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-              : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
-          }`}
+          className="text-xs shrink-0"
         >
-          <Layers className="w-4 h-4" />
-          <span>Overall Inventory (SKU Breakdown & Batches)</span>
-        </button>
+          <Layers className="w-3.5 h-3.5 mr-1" />
+          <span>Overall Inventory</span>
+        </Button>
 
-        <button
+        <Button
+          variant={activeTab === 'TRUCK_FLEET' ? 'default' : 'ghost'}
+          size="sm"
           onClick={() => setActiveTab('TRUCK_FLEET')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 shrink-0 ${
-            activeTab === 'TRUCK_FLEET'
-              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-              : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
-          }`}
+          className="text-xs shrink-0"
         >
-          <TruckIcon className="w-4 h-4 text-cyan-400" />
-          <span>🚚 Agent Trucks Fleet Inventory ({trucks.length} Trucks)</span>
-        </button>
+          <TruckIcon className="w-3.5 h-3.5 mr-1" />
+          <span>Trucks Fleet ({trucks.length})</span>
+        </Button>
 
-        <button
+        <Button
+          variant={activeTab === 'FIFO_BATCHES' ? 'default' : 'ghost'}
+          size="sm"
           onClick={() => setActiveTab('FIFO_BATCHES')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 shrink-0 ${
-            activeTab === 'FIFO_BATCHES'
-              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-              : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
-          }`}
+          className="text-xs shrink-0"
         >
-          <Calendar className="w-4 h-4 text-amber-400" />
-          <span>All FIFO Batch Lots ({batches.length})</span>
-        </button>
+          <Calendar className="w-3.5 h-3.5 mr-1" />
+          <span>FIFO Batches ({batches.length})</span>
+        </Button>
 
-        <button
+        <Button
+          variant={activeTab === 'RETURNABLES' ? 'default' : 'ghost'}
+          size="sm"
           onClick={() => setActiveTab('RETURNABLES')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 shrink-0 ${
-            activeTab === 'RETURNABLES'
-              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-              : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
-          }`}
+          className="text-xs shrink-0"
         >
-          <RotateCcw className="w-4 h-4 text-cyan-400" />
-          <span>Empty Containers Depot Stock</span>
-        </button>
+          <RotateCcw className="w-3.5 h-3.5 mr-1" />
+          <span>Empty Containers</span>
+        </Button>
       </div>
 
-      {/* Tab 1: Overall SKU Inventory with Accordion Batch Breakdown */}
+      {/* Tab 1: Overall SKU Inventory */}
       {activeTab === 'OVERALL_SKU' && (
-        <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Package className="w-5 h-5 text-indigo-400" />
-                <h3 className="font-bold text-white text-base">Overall Product Inventory & Batch Breakdown</h3>
-              </div>
-              <span className="text-xs text-slate-400 font-mono">Click any SKU row to expand underlying batch lots</span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm text-slate-300">
-                <thead className="bg-slate-950 text-slate-400 uppercase text-xs font-semibold tracking-wider border-b border-slate-800">
-                  <tr>
-                    <th className="w-10 px-4 py-4"></th>
-                    <th className="px-6 py-4">Product SKU & Name</th>
-                    <th className="px-6 py-4">Category</th>
-                    <th className="px-6 py-4">Total Stock (Cases)</th>
-                    <th className="px-6 py-4">Total Bottles</th>
-                    <th className="px-6 py-4">Earliest FIFO Expiry</th>
-                    <th className="px-6 py-4 text-right">Asset Valuation</th>
-                    <th className="px-6 py-4 text-right">Stock In Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {overallSkuSummaries.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-6 py-12 text-center text-slate-500 text-sm">
-                        No product SKUs created yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    overallSkuSummaries.map(({ product, prodBatches, totalCases, totalBottles, totalValue, earliestExpiry }) => {
-                      const isExpanded = expandedProductIds.has(product.id);
-
-                      return (
-                        <React.Fragment key={product.id}>
-                          <tr
-                            onClick={() => toggleExpandProduct(product.id)}
-                            className="hover:bg-slate-800/60 cursor-pointer transition-colors"
-                          >
-                            <td className="px-4 py-4 text-slate-500 text-center">
-                              {isExpanded ? <ChevronDown className="w-4 h-4 text-indigo-400" /> : <ChevronRight className="w-4 h-4 text-slate-500" />}
-                            </td>
-                            <td className="px-6 py-4 font-semibold text-white">
-                              <div className="flex items-center space-x-2">
-                                <span className="font-bold text-white text-base">{product.name}</span>
-                                <span className="text-[10px] font-mono font-bold text-indigo-400 px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20">
-                                  {product.sku}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 uppercase">
-                                {product.category}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 font-extrabold font-mono text-emerald-400 text-base">
-                              {totalCases.toLocaleString()} <span className="text-xs text-slate-500 font-normal">cases</span>
-                            </td>
-                            <td className="px-6 py-4 font-mono text-slate-300">
-                              {totalBottles.toLocaleString()} <span className="text-xs text-slate-500">bottles</span>
-                            </td>
-                            <td className="px-6 py-4 font-mono text-amber-300 text-xs">
-                              {earliestExpiry}
-                            </td>
-                            <td className="px-6 py-4 text-right font-mono font-black text-indigo-400 text-base">
-                              ₱{totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openStockInModal(product.id);
-                                }}
-                                className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-all"
-                              >
-                                + Stock In
-                              </button>
-                            </td>
-                          </tr>
-
-                          {isExpanded && (
-                            <tr>
-                              <td colSpan={8} className="bg-slate-950/80 p-4 border-t border-b border-indigo-500/30">
-                                <div className="space-y-3 pl-8 pr-4">
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center space-x-2 text-xs font-bold text-amber-400">
-                                      <Calendar className="w-4 h-4" />
-                                      <span>Batch Lots Breakdown for {product.name} ({prodBatches.length} active lots)</span>
-                                    </div>
-                                    <button
-                                      onClick={() => openStockInModal(product.id)}
-                                      className="text-xs text-emerald-400 font-bold hover:underline"
-                                    >
-                                      + Receive New Batch Lot
-                                    </button>
-                                  </div>
-
-                                  {prodBatches.length === 0 ? (
-                                    <div className="p-4 bg-slate-900/60 rounded-xl text-center text-slate-500 text-xs">
-                                      No batch lot records found for this product. Click <strong>+ Stock In</strong> above to receive the first batch.
-                                    </div>
-                                  ) : (
-                                    <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-                                      <table className="w-full text-left text-xs text-slate-300">
-                                        <thead className="bg-slate-950 text-slate-400 uppercase font-mono border-b border-slate-800">
-                                          <tr>
-                                            <th className="px-4 py-2.5">FIFO Rank</th>
-                                            <th className="px-4 py-2.5">Batch / Lot Number</th>
-                                            <th className="px-4 py-2.5">Manufacture Date</th>
-                                            <th className="px-4 py-2.5">Expiration Date</th>
-                                            <th className="px-4 py-2.5">Remaining Stock</th>
-                                            <th className="px-4 py-2.5 text-right">Action</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-800">
-                                          {prodBatches.map((b: ProductBatch, idx: number) => {
-                                            const expDateObj = new Date(b.expiry_date);
-                                            const todayObj = new Date();
-                                            const diffDays = Math.ceil((expDateObj.getTime() - todayObj.getTime()) / (1000 * 3600 * 24));
-                                            const isExpiringSoon = diffDays <= 30;
-
-                                            return (
-                                              <tr key={b.id} className="hover:bg-slate-800/40">
-                                                <td className="px-4 py-2.5">
-                                                  {idx === 0 ? (
-                                                    <span className="font-bold text-emerald-400 px-2 py-0.5 bg-emerald-500/10 rounded border border-emerald-500/20">
-                                                      FIFO #1 (Dispatch First)
-                                                    </span>
-                                                  ) : (
-                                                    <span className="text-slate-500 font-mono">Lot #{idx + 1}</span>
-                                                  )}
-                                                </td>
-                                                <td className="px-4 py-2.5 font-mono font-bold text-white">{b.batch_number}</td>
-                                                <td className="px-4 py-2.5 font-mono text-slate-400">{b.manufacture_date || 'N/A'}</td>
-                                                <td className="px-4 py-2.5 font-mono font-bold">
-                                                  <span className={isExpiringSoon ? 'text-rose-400' : 'text-slate-200'}>
-                                                    {b.expiry_date}
-                                                  </span>
-                                                  {isExpiringSoon && (
-                                                    <span className="ml-2 text-[9px] font-bold text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/20">
-                                                      FEFO Alert ({diffDays} days left)
-                                                    </span>
-                                                  )}
-                                                </td>
-                                                <td className="px-4 py-2.5 font-mono font-extrabold text-emerald-400">
-                                                  {b.remaining_quantity} cases
-                                                </td>
-                                                <td className="px-4 py-2.5 text-right">
-                                                  <button
-                                                    onClick={() => setPrintingBatch({ batch: b, product })}
-                                                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg flex items-center space-x-1 font-bold text-xs border border-slate-700 ml-auto"
-                                                  >
-                                                    <Printer className="w-3.5 h-3.5 text-indigo-400" />
-                                                    <span>Print Sticker</span>
-                                                  </button>
-                                                </td>
-                                              </tr>
-                                            );
-                                          })}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 2: Agent Trucks Fleet Inventory Breakdown */}
-      {activeTab === 'TRUCK_FLEET' && (
-        <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <TruckIcon className="w-5 h-5 text-cyan-400" />
-                <h3 className="font-bold text-white text-base">Agent Delivery Trucks Fleet Loaded Inventory</h3>
-              </div>
-              <span className="text-xs text-slate-400 font-mono">Live inventory loaded on agent trucks from stock transfers</span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm text-slate-300">
-                <thead className="bg-slate-950 text-slate-400 uppercase text-xs font-semibold tracking-wider border-b border-slate-800">
-                  <tr>
-                    <th className="w-10 px-4 py-4"></th>
-                    <th className="px-6 py-4">Truck Code & Plate</th>
-                    <th className="px-6 py-4">Assigned Agent / Driver</th>
-                    <th className="px-6 py-4">Status</th>
-                    <th className="px-6 py-4">Total Loaded Stock</th>
-                    <th className="px-6 py-4 text-right">Loaded Valuation</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {truckFleetSummaries.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-slate-500 text-sm">
-                        No trucks registered in fleet catalog.
-                      </td>
-                    </tr>
-                  ) : (
-                    truckFleetSummaries.map(({ truck, assignedAgent, totalTruckCases, totalTruckValuation, loadedItemsBreakdown }) => {
-                      const isExpanded = expandedTruckIds.has(truck.id);
-
-                      return (
-                        <React.Fragment key={truck.id}>
-                          <tr
-                            onClick={() => toggleExpandTruck(truck.id)}
-                            className="hover:bg-slate-800/60 cursor-pointer transition-colors"
-                          >
-                            <td className="px-4 py-4 text-slate-500 text-center">
-                              {isExpanded ? <ChevronDown className="w-4 h-4 text-cyan-400" /> : <ChevronRight className="w-4 h-4 text-slate-500" />}
-                            </td>
-                            <td className="px-6 py-4 font-semibold text-white">
-                              <div className="flex items-center space-x-2">
-                                <TruckIcon className="w-4 h-4 text-cyan-400 shrink-0" />
-                                <span className="font-bold text-white text-base">{truck.truck_code}</span>
-                                <span className="text-xs font-mono font-bold text-slate-400 px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
-                                  {truck.plate_number}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-slate-300 font-medium">
-                              <div className="flex items-center space-x-2">
-                                <User className="w-3.5 h-3.5 text-slate-500" />
-                                <span>{assignedAgent?.full_name || 'Unassigned'}</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 uppercase">
-                                {truck.status}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 font-extrabold font-mono text-cyan-400 text-base">
-                              {totalTruckCases.toLocaleString()} <span className="text-xs text-slate-500 font-normal">cases</span>
-                            </td>
-                            <td className="px-6 py-4 text-right font-mono font-black text-indigo-400 text-base">
-                              ₱{totalTruckValuation.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                          </tr>
-
-                          {/* Expanded Truck Loaded Inventory Items */}
-                          {isExpanded && (
-                            <tr>
-                              <td colSpan={6} className="bg-slate-950/80 p-4 border-t border-b border-cyan-500/30">
-                                <div className="space-y-3 pl-8 pr-4">
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center space-x-2 text-xs font-bold text-cyan-400">
-                                      <ShieldCheck className="w-4 h-4" />
-                                      <span>Current Loaded Stock Breakdown for {truck.truck_code} ({loadedItemsBreakdown.length} product SKUs)</span>
-                                    </div>
-                                    <Link to="/admin/transfers" className="text-xs text-indigo-400 font-bold hover:underline">
-                                      + Execute Stock Transfer →
-                                    </Link>
-                                  </div>
-
-                                  {loadedItemsBreakdown.length === 0 ? (
-                                    <div className="p-4 bg-slate-900/60 rounded-xl text-center text-slate-500 text-xs">
-                                      No stock currently loaded on this truck. Create a <strong>Stock Transfer</strong> to load cases.
-                                    </div>
-                                  ) : (
-                                    <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-                                      <table className="w-full text-left text-xs text-slate-300">
-                                        <thead className="bg-slate-950 text-slate-400 uppercase font-mono border-b border-slate-800">
-                                          <tr>
-                                            <th className="px-4 py-2.5">Product SKU & Name</th>
-                                            <th className="px-4 py-2.5">Loaded Cases</th>
-                                            <th className="px-4 py-2.5">Bottle Count</th>
-                                            <th className="px-4 py-2.5">Selling Case Price</th>
-                                            <th className="px-4 py-2.5 text-right">Total Item Value</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-800">
-                                          {loadedItemsBreakdown.map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-slate-800/40">
-                                              <td className="px-4 py-2.5 font-bold text-white">
-                                                {item.product?.name || 'Beverage Item'} ({item.product?.sku})
-                                              </td>
-                                              <td className="px-4 py-2.5 font-mono font-extrabold text-cyan-300">
-                                                {item.qtyCases} cases
-                                              </td>
-                                              <td className="px-4 py-2.5 font-mono text-slate-400">
-                                                {item.bottleCount.toLocaleString()} bottles
-                                              </td>
-                                              <td className="px-4 py-2.5 font-mono text-emerald-400">
-                                                ₱{item.casePrice.toFixed(2)} / cs
-                                              </td>
-                                              <td className="px-4 py-2.5 text-right font-mono font-bold text-indigo-300">
-                                                ₱{item.itemValuation.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                              </td>
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 3: All FIFO Batches View */}
-      {activeTab === 'FIFO_BATCHES' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-          <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+        <Card className="overflow-hidden">
+          <div className="p-3.5 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <Calendar className="w-5 h-5 text-amber-400" />
-              <h3 className="font-bold text-white text-base">FIFO Expiration Master Lot Directory</h3>
+              <Package className="w-4 h-4 text-zinc-700" />
+              <h3 className="font-semibold text-zinc-900 text-sm">Product Inventory & Batch Breakdown</h3>
             </div>
-            <span className="text-xs text-amber-300 font-mono">Sorted by Earliest Expiration Date</span>
+            <span className="text-xs text-zinc-500">Click SKU row to view batches</span>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-950 text-slate-400 uppercase text-xs font-semibold tracking-wider border-b border-slate-800">
+            <table className="w-full text-left text-xs sm:text-sm text-zinc-700">
+              <thead className="bg-zinc-50 text-zinc-500 uppercase text-[11px] font-medium tracking-wider border-b border-zinc-200">
                 <tr>
-                  <th className="px-6 py-4">Batch Number</th>
-                  <th className="px-6 py-4">Product SKU & Name</th>
-                  <th className="px-6 py-4">Manufacture Date</th>
-                  <th className="px-6 py-4">Expiration Date</th>
-                  <th className="px-6 py-4">Remaining Cases</th>
-                  <th className="px-6 py-4 text-right">Thermal Sticker Label</th>
+                  <th className="w-8 px-3 py-3"></th>
+                  <th className="px-4 py-3">Product SKU & Name</th>
+                  <th className="px-4 py-3">Category</th>
+                  <th className="px-4 py-3">Total Cases</th>
+                  <th className="px-4 py-3">Total Bottles</th>
+                  <th className="px-4 py-3">Earliest Expiry</th>
+                  <th className="px-4 py-3 text-right">Valuation</th>
+                  <th className="px-4 py-3 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800">
+              <tbody className="divide-y divide-zinc-100 bg-white">
+                {overallSkuSummaries.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-12 text-center text-zinc-400 text-sm">
+                      No product SKUs registered yet.
+                    </td>
+                  </tr>
+                ) : (
+                  overallSkuSummaries.map(({ product, prodBatches, totalCases, totalBottles, totalValue, earliestExpiry }) => {
+                    const isExpanded = expandedProductIds.has(product.id);
+
+                    return (
+                      <React.Fragment key={product.id}>
+                        <tr
+                          onClick={() => toggleExpandProduct(product.id)}
+                          className="hover:bg-zinc-50 cursor-pointer transition-colors"
+                        >
+                          <td className="px-3 py-3 text-zinc-400 text-center">
+                            {isExpanded ? <ChevronDown className="w-4 h-4 text-zinc-900" /> : <ChevronRight className="w-4 h-4" />}
+                          </td>
+                          <td className="px-4 py-3 font-medium text-zinc-900">
+                            <div className="flex items-center space-x-2">
+                              <span className="font-semibold text-zinc-900">{product.name}</span>
+                              <Badge variant="outline" className="font-mono text-[10px]">
+                                {product.sku}
+                              </Badge>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant="secondary" className="text-[10px]">
+                              {product.category}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-zinc-900">
+                            {totalCases.toLocaleString()} <span className="text-xs text-zinc-500 font-normal">cs</span>
+                          </td>
+                          <td className="px-4 py-3 text-zinc-600">
+                            {totalBottles.toLocaleString()} btls
+                          </td>
+                          <td className="px-4 py-3 font-mono text-zinc-700 text-xs">
+                            {earliestExpiry}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold text-zinc-900">
+                            ₱{totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openStockInModal(product.id);
+                              }}
+                              className="h-7 text-xs"
+                            >
+                              + Stock In
+                            </Button>
+                          </td>
+                        </tr>
+
+                        {isExpanded && (
+                          <tr>
+                            <td colSpan={8} className="bg-zinc-50 p-4 border-t border-b border-zinc-200">
+                              <div className="space-y-3 pl-6 pr-2">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-2 text-xs font-semibold text-zinc-800">
+                                    <Calendar className="w-3.5 h-3.5 text-zinc-600" />
+                                    <span>Batches for {product.name} ({prodBatches.length} lots)</span>
+                                  </div>
+                                  <button
+                                    onClick={() => openStockInModal(product.id)}
+                                    className="text-xs text-zinc-900 font-medium hover:underline cursor-pointer"
+                                  >
+                                    + Receive New Batch
+                                  </button>
+                                </div>
+
+                                {prodBatches.length === 0 ? (
+                                  <div className="p-3 bg-white border border-zinc-200 rounded-md text-center text-zinc-400 text-xs">
+                                    No batch lot records found. Click + Stock In to receive stock.
+                                  </div>
+                                ) : (
+                                  <div className="bg-white rounded-md border border-zinc-200 overflow-hidden">
+                                    <table className="w-full text-left text-xs text-zinc-700">
+                                      <thead className="bg-zinc-50 text-zinc-500 uppercase font-mono border-b border-zinc-200 text-[10px]">
+                                        <tr>
+                                          <th className="px-3 py-2">FIFO Rank</th>
+                                          <th className="px-3 py-2">Batch / Lot #</th>
+                                          <th className="px-3 py-2">Mfg Date</th>
+                                          <th className="px-3 py-2">Expiry Date</th>
+                                          <th className="px-3 py-2">Remaining</th>
+                                          <th className="px-3 py-2 text-right">Action</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-zinc-100">
+                                        {prodBatches.map((b: ProductBatch, idx: number) => {
+                                          const expDateObj = new Date(b.expiry_date);
+                                          const todayObj = new Date();
+                                          const diffDays = Math.ceil((expDateObj.getTime() - todayObj.getTime()) / (1000 * 3600 * 24));
+                                          const isExpiringSoon = diffDays <= 30;
+
+                                          return (
+                                            <tr key={b.id} className="hover:bg-zinc-50">
+                                              <td className="px-3 py-2">
+                                                {idx === 0 ? (
+                                                  <Badge variant="default" className="text-[9px]">
+                                                    FIFO #1 (Dispatch First)
+                                                  </Badge>
+                                                ) : (
+                                                  <span className="text-zinc-500 font-mono">Lot #{idx + 1}</span>
+                                                )}
+                                              </td>
+                                              <td className="px-3 py-2 font-mono font-medium text-zinc-900">{b.batch_number}</td>
+                                              <td className="px-3 py-2 font-mono text-zinc-500">{b.manufacture_date || 'N/A'}</td>
+                                              <td className="px-3 py-2 font-mono font-medium">
+                                                <span className={isExpiringSoon ? 'text-red-600' : 'text-zinc-900'}>
+                                                  {b.expiry_date}
+                                                </span>
+                                                {isExpiringSoon && (
+                                                  <Badge variant="destructive" className="ml-1.5 text-[9px]">
+                                                    {diffDays}d left
+                                                  </Badge>
+                                                )}
+                                              </td>
+                                              <td className="px-3 py-2 font-mono font-semibold text-zinc-900">
+                                                {b.remaining_quantity} cs
+                                              </td>
+                                              <td className="px-3 py-2 text-right">
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  onClick={() => setPrintingBatch({ batch: b, product })}
+                                                  className="h-6 px-2 text-xs ml-auto"
+                                                >
+                                                  <Printer className="w-3 h-3 mr-1" />
+                                                  <span>Label</span>
+                                                </Button>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* Tab 2: Agent Trucks Fleet Inventory */}
+      {activeTab === 'TRUCK_FLEET' && (
+        <Card className="overflow-hidden">
+          <div className="p-3.5 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <TruckIcon className="w-4 h-4 text-zinc-700" />
+              <h3 className="font-semibold text-zinc-900 text-sm">Delivery Trucks Loaded Stock</h3>
+            </div>
+            <span className="text-xs text-zinc-500">Live inventory from transfers</span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs sm:text-sm text-zinc-700">
+              <thead className="bg-zinc-50 text-zinc-500 uppercase text-[11px] font-medium tracking-wider border-b border-zinc-200">
+                <tr>
+                  <th className="w-8 px-3 py-3"></th>
+                  <th className="px-4 py-3">Truck Code & Plate</th>
+                  <th className="px-4 py-3">Assigned Agent</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Loaded Stock</th>
+                  <th className="px-4 py-3 text-right">Loaded Value</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 bg-white">
+                {truckFleetSummaries.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-12 text-center text-zinc-400 text-sm">
+                      No trucks registered in fleet.
+                    </td>
+                  </tr>
+                ) : (
+                  truckFleetSummaries.map(({ truck, assignedAgent, totalTruckCases, totalTruckValuation, loadedItemsBreakdown }) => {
+                    const isExpanded = expandedTruckIds.has(truck.id);
+
+                    return (
+                      <React.Fragment key={truck.id}>
+                        <tr
+                          onClick={() => toggleExpandTruck(truck.id)}
+                          className="hover:bg-zinc-50 cursor-pointer transition-colors"
+                        >
+                          <td className="px-3 py-3 text-zinc-400 text-center">
+                            {isExpanded ? <ChevronDown className="w-4 h-4 text-zinc-900" /> : <ChevronRight className="w-4 h-4" />}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-zinc-900">
+                            <div className="flex items-center space-x-2">
+                              <TruckIcon className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
+                              <span>{truck.truck_code}</span>
+                              <Badge variant="outline" className="font-mono text-[10px]">
+                                {truck.plate_number}
+                              </Badge>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-zinc-700">
+                            <div className="flex items-center space-x-1.5">
+                              <User className="w-3.5 h-3.5 text-zinc-400" />
+                              <span>{assignedAgent?.full_name || 'Unassigned'}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant="secondary" className="text-[10px]">
+                              {truck.status}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-zinc-900">
+                            {totalTruckCases.toLocaleString()} <span className="text-xs text-zinc-500 font-normal">cs</span>
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold text-zinc-900">
+                            ₱{totalTruckValuation.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+
+                        {isExpanded && (
+                          <tr>
+                            <td colSpan={6} className="bg-zinc-50 p-4 border-t border-b border-zinc-200">
+                              <div className="space-y-3 pl-6 pr-2">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-2 text-xs font-semibold text-zinc-800">
+                                    <ShieldCheck className="w-3.5 h-3.5 text-zinc-600" />
+                                    <span>Stock Breakdown for {truck.truck_code} ({loadedItemsBreakdown.length} items)</span>
+                                  </div>
+                                  <Link to="/admin/transfers" className="text-xs text-zinc-900 font-medium hover:underline">
+                                    + Stock Transfer →
+                                  </Link>
+                                </div>
+
+                                {loadedItemsBreakdown.length === 0 ? (
+                                  <div className="p-3 bg-white border border-zinc-200 rounded-md text-center text-zinc-400 text-xs">
+                                    No stock currently loaded on this truck.
+                                  </div>
+                                ) : (
+                                  <div className="bg-white rounded-md border border-zinc-200 overflow-hidden">
+                                    <table className="w-full text-left text-xs text-zinc-700">
+                                      <thead className="bg-zinc-50 text-zinc-500 uppercase font-mono border-b border-zinc-200 text-[10px]">
+                                        <tr>
+                                          <th className="px-3 py-2">Product</th>
+                                          <th className="px-3 py-2">Loaded Cases</th>
+                                          <th className="px-3 py-2">Bottle Count</th>
+                                          <th className="px-3 py-2">Case Price</th>
+                                          <th className="px-3 py-2 text-right">Value</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-zinc-100">
+                                        {loadedItemsBreakdown.map((item, idx) => (
+                                          <tr key={idx} className="hover:bg-zinc-50">
+                                            <td className="px-3 py-2 font-medium text-zinc-900">
+                                              {item.product?.name || 'Beverage Item'} ({item.product?.sku})
+                                            </td>
+                                            <td className="px-3 py-2 font-mono font-semibold text-zinc-900">
+                                              {item.qtyCases} cs
+                                            </td>
+                                            <td className="px-3 py-2 font-mono text-zinc-500">
+                                              {item.bottleCount.toLocaleString()} btls
+                                            </td>
+                                            <td className="px-3 py-2 font-mono text-zinc-700">
+                                              ₱{item.casePrice.toFixed(2)} / cs
+                                            </td>
+                                            <td className="px-3 py-2 text-right font-mono font-semibold text-zinc-900">
+                                              ₱{item.itemValuation.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* Tab 3: FIFO Batches */}
+      {activeTab === 'FIFO_BATCHES' && (
+        <Card className="overflow-hidden">
+          <div className="p-3.5 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Calendar className="w-4 h-4 text-zinc-700" />
+              <h3 className="font-semibold text-zinc-900 text-sm">FIFO Expiration Master Lot Directory</h3>
+            </div>
+            <span className="text-xs text-zinc-500">Sorted by Earliest Expiration</span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs sm:text-sm text-zinc-700">
+              <thead className="bg-zinc-50 text-zinc-500 uppercase text-[11px] font-medium tracking-wider border-b border-zinc-200">
+                <tr>
+                  <th className="px-4 py-3">Batch Number</th>
+                  <th className="px-4 py-3">Product SKU & Name</th>
+                  <th className="px-4 py-3">Mfg Date</th>
+                  <th className="px-4 py-3">Expiry Date</th>
+                  <th className="px-4 py-3">Remaining Cases</th>
+                  <th className="px-4 py-3 text-right">Label</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 bg-white">
                 {batches.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-slate-500 text-sm">
-                      No active FIFO batch lots recorded. Click <strong>+ Stock In</strong> to receive supplier stock.
+                    <td colSpan={6} className="px-6 py-12 text-center text-zinc-400 text-sm">
+                      No active FIFO batch lots recorded.
                     </td>
                   </tr>
                 ) : (
@@ -826,32 +832,34 @@ export const WarehousePage: React.FC = () => {
                     const isExpiringSoon = diffDays <= 30;
 
                     return (
-                      <tr key={b.id} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="px-6 py-4 font-mono font-bold text-amber-300">{b.batch_number}</td>
-                        <td className="px-6 py-4 font-semibold text-white">
+                      <tr key={b.id} className="hover:bg-zinc-50 transition-colors">
+                        <td className="px-4 py-3 font-mono font-medium text-zinc-900">{b.batch_number}</td>
+                        <td className="px-4 py-3 font-medium text-zinc-900">
                           {prod?.name || 'Unknown Product'} ({prod?.sku})
                         </td>
-                        <td className="px-6 py-4 font-mono text-slate-400">{b.manufacture_date || 'N/A'}</td>
-                        <td className="px-6 py-4 font-mono font-bold">
-                          <span className={isExpiringSoon ? 'text-rose-400' : 'text-slate-200'}>{b.expiry_date}</span>
+                        <td className="px-4 py-3 font-mono text-zinc-500">{b.manufacture_date || 'N/A'}</td>
+                        <td className="px-4 py-3 font-mono font-medium">
+                          <span className={isExpiringSoon ? 'text-red-600' : 'text-zinc-900'}>{b.expiry_date}</span>
                           {isExpiringSoon && (
-                            <span className="ml-2 text-[9px] font-bold text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/20">
-                              FEFO Alert ({diffDays}d)
-                            </span>
+                            <Badge variant="destructive" className="ml-1.5 text-[9px]">
+                              {diffDays}d left
+                            </Badge>
                           )}
                         </td>
-                        <td className="px-6 py-4 font-mono font-extrabold text-emerald-400 text-base">
-                          {b.remaining_quantity} cases
+                        <td className="px-4 py-3 font-mono font-semibold text-zinc-900">
+                          {b.remaining_quantity} cs
                         </td>
-                        <td className="px-6 py-4 text-right">
+                        <td className="px-4 py-3 text-right">
                           {prod && (
-                            <button
+                            <Button
+                              variant="outline"
+                              size="sm"
                               onClick={() => setPrintingBatch({ batch: b, product: prod })}
-                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg inline-flex items-center space-x-1.5 font-bold text-xs border border-slate-700"
+                              className="h-7 text-xs"
                             >
-                              <Printer className="w-3.5 h-3.5 text-indigo-400" />
-                              <span>Print Sticker</span>
-                            </button>
+                              <Printer className="w-3.5 h-3.5 mr-1 text-zinc-600" />
+                              <span>Print</span>
+                            </Button>
                           )}
                         </td>
                       </tr>
@@ -861,12 +869,11 @@ export const WarehousePage: React.FC = () => {
               </tbody>
             </table>
           </div>
-        </div>
+        </Card>
       )}
 
-      {/* Tab 4: Empty Containers Depot Stock */}
+      {/* Tab 4: Empty Containers */}
       {activeTab === 'RETURNABLES' && (() => {
-        // 1. Consolidate raw returnable_balances by (location_id, returnable_item_id)
         const consolidatedMap = new Map<string, any>();
 
         (returnableBalances || []).forEach((rb) => {
@@ -887,7 +894,6 @@ export const WarehousePage: React.FC = () => {
 
         const consolidatedList = Array.from(consolidatedMap.values());
 
-        // 2. Compute Converted Full Empty Cases & Loose Breakdown per Location
         let totalWarehouseBottles = 0;
         let totalWarehouseShellCases = 0;
 
@@ -900,102 +906,99 @@ export const WarehousePage: React.FC = () => {
           }
         });
 
-        const bottlesPerCase = 6; // Standard 1L case bottle capacity
+        const bottlesPerCase = 6;
         const fullEmptyCases = Math.min(Math.floor(totalWarehouseBottles / bottlesPerCase), totalWarehouseShellCases);
         const looseBottles = totalWarehouseBottles - (fullEmptyCases * bottlesPerCase);
         const looseShellCases = totalWarehouseShellCases - fullEmptyCases;
 
         return (
           <div className="space-y-4">
-            {/* Conversion Summary Banner */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
-              <div className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-2 font-mono flex items-center gap-1.5">
-                <RotateCcw className="w-4 h-4 text-amber-400" />
-                Main Warehouse Empty Case Conversion & Depot Stock
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-xs">
-                <div className="bg-slate-950 p-3.5 rounded-xl border border-emerald-500/30">
-                  <span className="text-[10px] text-emerald-400 uppercase font-bold block">📦 Full Empty Cases (Complete Sets)</span>
-                  <span className="text-xl font-black text-emerald-400 block mt-1">
-                    {fullEmptyCases} <span className="text-xs text-slate-400 font-normal">cases</span>
-                  </span>
-                  <span className="text-[10px] text-slate-400 block mt-0.5">
-                    ({fullEmptyCases * bottlesPerCase} bottles + {fullEmptyCases} shell crates @ {bottlesPerCase} btl/cs)
-                  </span>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-xs font-semibold text-zinc-900 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <RotateCcw className="w-3.5 h-3.5 text-zinc-700" />
+                  <span>Depot Returnables Breakdown</span>
                 </div>
 
-                <div className="bg-slate-950 p-3.5 rounded-xl border border-amber-500/30">
-                  <span className="text-[10px] text-amber-300 uppercase font-bold block">🍾 Loose Empties Remaining</span>
-                  <span className="text-lg font-extrabold text-amber-300 block mt-1">
-                    {looseBottles} <span className="text-xs text-slate-400 font-normal">bottles</span>
-                  </span>
-                  <span className="text-[10px] text-slate-400 block mt-0.5">Unpaired loose bottles</span>
-                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  <div className="bg-zinc-50 p-3 rounded-md border border-zinc-200">
+                    <span className="text-[10px] text-zinc-500 uppercase font-semibold block">Full Empty Cases (Sets)</span>
+                    <span className="text-lg font-bold text-zinc-900 block mt-0.5">
+                      {fullEmptyCases} <span className="text-xs text-zinc-500 font-normal">cases</span>
+                    </span>
+                    <span className="text-[10px] text-zinc-400 block mt-0.5">
+                      ({fullEmptyCases * bottlesPerCase} btls + {fullEmptyCases} crates)
+                    </span>
+                  </div>
 
-                <div className="bg-slate-950 p-3.5 rounded-xl border border-cyan-500/30">
-                  <span className="text-[10px] text-cyan-300 uppercase font-bold block">📥 Loose Shell Crates</span>
-                  <span className="text-lg font-extrabold text-cyan-300 block mt-1">
-                    {looseShellCases} <span className="text-xs text-slate-400 font-normal">cases</span>
-                  </span>
-                  <span className="text-[10px] text-slate-400 block mt-0.5">Empty crates without bottles</span>
-                </div>
-              </div>
-            </div>
+                  <div className="bg-zinc-50 p-3 rounded-md border border-zinc-200">
+                    <span className="text-[10px] text-zinc-500 uppercase font-semibold block">Loose Bottles</span>
+                    <span className="text-lg font-bold text-zinc-900 block mt-0.5">
+                      {looseBottles} <span className="text-xs text-zinc-500 font-normal">bottles</span>
+                    </span>
+                    <span className="text-[10px] text-zinc-400 block mt-0.5">Unpaired loose bottles</span>
+                  </div>
 
-            {/* Consolidated Stock Table */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-              <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+                  <div className="bg-zinc-50 p-3 rounded-md border border-zinc-200">
+                    <span className="text-[10px] text-zinc-500 uppercase font-semibold block">Loose Crates</span>
+                    <span className="text-lg font-bold text-zinc-900 block mt-0.5">
+                      {looseShellCases} <span className="text-xs text-zinc-500 font-normal">cases</span>
+                    </span>
+                    <span className="text-[10px] text-zinc-400 block mt-0.5">Empty crates without bottles</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="overflow-hidden">
+              <div className="p-3.5 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between">
                 <div className="flex items-center space-x-2">
-                  <RotateCcw className="w-5 h-5 text-amber-400" />
-                  <h3 className="font-bold text-white text-base">Consolidated Empty Bottle & Shell Case Inventory</h3>
+                  <RotateCcw className="w-4 h-4 text-zinc-700" />
+                  <h3 className="font-semibold text-zinc-900 text-sm">Container Balances</h3>
                 </div>
-                <span className="text-xs text-slate-400 font-mono">{consolidatedList.length} consolidated container balances</span>
+                <span className="text-xs text-zinc-500">{consolidatedList.length} balances</span>
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm text-slate-300">
-                  <thead className="bg-slate-950 text-slate-400 uppercase text-xs font-semibold tracking-wider border-b border-slate-800">
+                <table className="w-full text-left text-xs sm:text-sm text-zinc-700">
+                  <thead className="bg-zinc-50 text-zinc-500 uppercase text-[11px] font-medium tracking-wider border-b border-zinc-200">
                     <tr>
-                      <th className="px-6 py-4">Returnable Container</th>
-                      <th className="px-6 py-4">Location / Origin</th>
-                      <th className="px-6 py-4">Container Type</th>
-                      <th className="px-6 py-4">Consolidated Depot Stock</th>
-                      <th className="px-6 py-4">PUNDO Valuation Rate</th>
+                      <th className="px-4 py-3">Container</th>
+                      <th className="px-4 py-3">Location</th>
+                      <th className="px-4 py-3">Type</th>
+                      <th className="px-4 py-3">Depot Stock</th>
+                      <th className="px-4 py-3">PUNDO Rate</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800">
+                  <tbody className="divide-y divide-zinc-100 bg-white">
                     {consolidatedList.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-8 text-center text-slate-500 text-xs">
-                          No empty bottles or cases currently stored in main warehouse depot.
+                        <td colSpan={5} className="px-6 py-8 text-center text-zinc-400 text-xs">
+                          No returnable containers currently stored.
                         </td>
                       </tr>
                     ) : (
                       consolidatedList.map((rb) => {
                         const itemType = rb.returnable_items?.item_type || rb.returnable_items?.type || 'CONTAINER';
-                        const isWh = rb.locations?.type === 'WAREHOUSE' || !rb.locations;
 
                         return (
-                          <tr key={rb.id} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="px-6 py-4 font-semibold text-white">
+                          <tr key={rb.id} className="hover:bg-zinc-50 transition-colors">
+                            <td className="px-4 py-3 font-medium text-zinc-900">
                               {rb.returnable_items?.name || 'Returnable Container'}
                             </td>
-                            <td className="px-6 py-4">
-                              <span className={`text-xs font-bold ${isWh ? 'text-indigo-400 font-mono' : 'text-cyan-400 font-mono'}`}>
-                                {rb.locations?.name || 'Main Warehouse Depot'}
-                              </span>
+                            <td className="px-4 py-3 text-zinc-600">
+                              {rb.locations?.name || 'Main Warehouse Depot'}
                             </td>
-                            <td className="px-6 py-4">
-                              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold uppercase">
+                            <td className="px-4 py-3">
+                              <Badge variant="outline" className="text-[10px]">
                                 {itemType}
-                              </span>
+                              </Badge>
                             </td>
-                            <td className="px-6 py-4 font-extrabold font-mono text-amber-300 text-base">
-                              {Number(rb.quantity).toLocaleString()} <span className="text-xs text-slate-500 font-normal">{rb.returnable_items?.unit || 'pcs'}</span>
+                            <td className="px-4 py-3 font-semibold text-zinc-900 font-mono">
+                              {Number(rb.quantity).toLocaleString()} {rb.returnable_items?.unit || 'pcs'}
                             </td>
-                            <td className="px-6 py-4 text-xs font-mono text-emerald-400 font-bold">
-                              ₱{Number(rb.returnable_items?.pundo_value || rb.returnable_items?.deposit_rate || 0).toFixed(2)} / {rb.returnable_items?.unit || 'pc'}
+                            <td className="px-4 py-3 text-xs font-mono font-medium text-zinc-900">
+                              ₱{Number(rb.returnable_items?.pundo_value || rb.returnable_items?.deposit_rate || 0).toFixed(2)}
                             </td>
                           </tr>
                         );
@@ -1004,31 +1007,33 @@ export const WarehousePage: React.FC = () => {
                   </tbody>
                 </table>
               </div>
-            </div>
+            </Card>
           </div>
         );
       })()}
 
-      {/* Stock In (Receive New Batch) Modal */}
+      {/* Stock In Modal */}
       {isStockInModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
-              <div className="flex items-center space-x-2 text-emerald-400 font-bold">
-                <Plus className="w-5 h-5" />
-                <h3 className="text-lg">Warehouse Stock In (Receive Batch)</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="bg-white border border-zinc-200 rounded-lg max-w-md w-full p-6 shadow-xl text-zinc-900">
+            <div className="flex items-center justify-between border-b border-zinc-200 pb-3 mb-4">
+              <div className="flex items-center space-x-2 font-semibold text-zinc-900">
+                <Plus className="w-4 h-4" />
+                <h3 className="text-base">Warehouse Stock In (Receive Batch)</h3>
               </div>
-              <button onClick={() => setIsStockInModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+              <button onClick={() => setIsStockInModalOpen(false)} className="text-zinc-400 hover:text-zinc-700 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
             <form onSubmit={handleStockInSubmit} className="space-y-4 text-sm">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Select Product SKU *</label>
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700">Select Product SKU *</label>
                 <select
                   required
                   value={stockInProductId}
                   onChange={(e) => setStockInProductId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-semibold text-xs"
+                  className="w-full bg-white border border-zinc-300 rounded-md px-3 py-2 text-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-zinc-950 cursor-pointer"
                 >
                   <option value="">Select product...</option>
                   {products.map((p) => (
@@ -1039,57 +1044,59 @@ export const WarehousePage: React.FC = () => {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Batch / Lot Number *</label>
-                <input
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700">Batch / Lot Number *</label>
+                <Input
                   type="text"
                   required
                   placeholder="LOT-202609-001"
                   value={stockInBatchNum}
                   onChange={(e) => setStockInBatchNum(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono uppercase text-xs text-amber-300 font-bold"
+                  className="font-mono uppercase text-xs font-semibold"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Manufacture Date</label>
-                  <input
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-zinc-700">Manufacture Date</label>
+                  <Input
                     type="date"
                     value={stockInMfgDate}
                     onChange={(e) => setStockInMfgDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono"
+                    className="text-xs font-mono"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Expiration Date (FIFO) *</label>
-                  <input
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-zinc-700">Expiration Date (FIFO) *</label>
+                  <Input
                     type="date"
                     required
                     value={stockInExpDate}
                     onChange={(e) => setStockInExpDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-rose-400 font-mono font-bold"
+                    className="text-xs font-mono"
                   />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Received Cases Quantity *</label>
-                <input
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700">Received Cases Quantity *</label>
+                <Input
                   type="number"
                   required
                   min={1}
                   value={stockInCases}
                   onChange={(e) => setStockInCases(Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-emerald-400 font-extrabold"
+                  className="text-xs font-mono font-semibold"
                 />
               </div>
 
-              <div className="flex justify-end space-x-3 pt-3 border-t border-slate-800">
-                <button type="button" onClick={() => setIsStockInModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-300 text-xs rounded-xl">Cancel</button>
-                <button type="submit" disabled={savingStockIn} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-emerald-600/30">
-                  {savingStockIn ? 'Saving...' : 'Complete Stock In & Print Label'}
-                </button>
+              <div className="flex justify-end space-x-2 pt-3 border-t border-zinc-200">
+                <Button type="button" variant="outline" size="sm" onClick={() => setIsStockInModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" disabled={savingStockIn}>
+                  {savingStockIn ? 'Saving...' : 'Receive Stock'}
+                </Button>
               </div>
             </form>
           </div>
@@ -1098,24 +1105,26 @@ export const WarehousePage: React.FC = () => {
 
       {/* Manual Stock Adjustment Modal */}
       {isAdjModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
-              <div className="flex items-center space-x-2">
-                <AlertTriangle className="w-5 h-5 text-amber-400" />
-                <h3 className="text-lg font-bold">Manual Stock Adjustment</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="bg-white border border-zinc-200 rounded-lg max-w-md w-full p-6 shadow-xl text-zinc-900">
+            <div className="flex items-center justify-between border-b border-zinc-200 pb-3 mb-4">
+              <div className="flex items-center space-x-2 font-semibold text-zinc-900">
+                <AlertTriangle className="w-4 h-4 text-zinc-700" />
+                <h3 className="text-base">Manual Stock Adjustment</h3>
               </div>
-              <button onClick={() => setIsAdjModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+              <button onClick={() => setIsAdjModalOpen(false)} className="text-zinc-400 hover:text-zinc-700 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
             <form onSubmit={handleAdjustment} className="space-y-4 text-sm">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Select Product *</label>
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700">Select Product *</label>
                 <select
                   required
                   value={selectedProdId}
                   onChange={(e) => setSelectedProdId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white text-xs focus:outline-none"
+                  className="w-full bg-white border border-zinc-300 rounded-md px-3 py-2 text-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-zinc-950 cursor-pointer"
                 >
                   <option value="">Select product...</option>
                   {products.map((p) => (
@@ -1127,25 +1136,25 @@ export const WarehousePage: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Quantity Change *</label>
-                  <input
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-zinc-700">Quantity Change *</label>
+                  <Input
                     type="number"
                     required
                     placeholder="+5 or -2"
                     value={deltaQty}
                     onChange={(e) => setDeltaQty(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-bold focus:outline-none"
+                    className="font-mono text-xs"
                   />
-                  <span className="text-[10px] text-slate-500">Positive for add, negative for deduction</span>
+                  <span className="text-[10px] text-zinc-500">Positive to add, negative to deduct</span>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Reason *</label>
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-zinc-700">Reason *</label>
                   <select
                     value={adjReason}
                     onChange={(e) => setAdjReason(e.target.value as AdjustmentReason)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none"
+                    className="w-full bg-white border border-zinc-300 rounded-md px-3 py-2 text-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-zinc-950 cursor-pointer"
                   >
                     <option value="DAMAGED">DAMAGED</option>
                     <option value="BROKEN">BROKEN</option>
@@ -1157,32 +1166,33 @@ export const WarehousePage: React.FC = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Notes / Explanation</label>
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700">Notes / Explanation</label>
                 <textarea
                   rows={2}
-                  placeholder="Explain why adjustment is being performed..."
+                  placeholder="Explain reason for adjustment..."
                   value={adjNotes}
                   onChange={(e) => setAdjNotes(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none text-xs"
+                  className="w-full bg-white border border-zinc-300 rounded-md px-3 py-2 text-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-950 text-xs"
                 />
               </div>
 
-              <div className="pt-4 border-t border-slate-800 flex justify-end space-x-3">
-                <button
+              <div className="pt-3 border-t border-zinc-200 flex justify-end space-x-2">
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={() => setIsAdjModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs hover:bg-slate-700"
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
+                  size="sm"
                   disabled={savingAdj}
-                  className="px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-semibold hover:bg-amber-500 disabled:opacity-50"
                 >
                   {savingAdj ? 'Applying...' : 'Apply Adjustment'}
-                </button>
+                </Button>
               </div>
             </form>
           </div>
@@ -1191,22 +1201,23 @@ export const WarehousePage: React.FC = () => {
 
       {/* Thermal Printable Batch Sticker Modal */}
       {printingBatch && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
-              <h3 className="text-sm font-bold flex items-center space-x-2 text-indigo-400">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="bg-white border border-zinc-200 rounded-lg max-w-sm w-full p-6 shadow-xl text-zinc-900">
+            <div className="flex items-center justify-between border-b border-zinc-200 pb-3 mb-4">
+              <h3 className="text-sm font-semibold flex items-center space-x-2 text-zinc-900">
                 <Printer className="w-4 h-4" />
                 <span>Print Thermal Batch Label</span>
               </h3>
-              <button onClick={() => setPrintingBatch(null)} className="text-slate-400 hover:text-white">✕</button>
+              <button onClick={() => setPrintingBatch(null)} className="text-zinc-400 hover:text-zinc-700 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
-            {/* Thermal Label Physical Layout */}
-            <div className="p-4 bg-white text-black rounded-xl space-y-2 border-2 border-dashed border-slate-400 font-sans shadow-inner">
+            <div className="p-4 bg-white text-black rounded-lg space-y-2 border-2 border-dashed border-zinc-400 font-sans">
               <div className="flex justify-between items-start border-b border-black pb-1.5">
                 <div>
                   <div className="text-[11px] font-black uppercase tracking-tight">{tenant?.name || 'BEVERAGE DISTRIBUTOR'}</div>
-                  <div className="text-[9px] font-bold text-slate-800 uppercase">{printingBatch.product.brand} • {printingBatch.product.name}</div>
+                  <div className="text-[9px] font-bold text-zinc-800 uppercase">{printingBatch.product.brand} • {printingBatch.product.name}</div>
                 </div>
                 <div className="text-right">
                   <div className="text-[10px] font-mono font-bold bg-black text-white px-1.5 py-0.5 rounded">
@@ -1215,49 +1226,52 @@ export const WarehousePage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="py-1 grid grid-cols-2 gap-2 text-center bg-slate-100 rounded border border-slate-300">
+              <div className="py-1 grid grid-cols-2 gap-2 text-center bg-zinc-100 rounded border border-zinc-300">
                 <div>
-                  <span className="text-[8px] font-bold text-slate-600 uppercase block">BATCH NUMBER</span>
-                  <span className="text-xs font-mono font-black tracking-wider text-indigo-900">{printingBatch.batch.batch_number}</span>
+                  <span className="text-[8px] font-bold text-zinc-600 uppercase block">BATCH NUMBER</span>
+                  <span className="text-xs font-mono font-black tracking-wider text-zinc-900">{printingBatch.batch.batch_number}</span>
                 </div>
                 <div>
-                  <span className="text-[8px] font-bold text-slate-600 uppercase block">CASES IN BATCH</span>
-                  <span className="text-xs font-mono font-black text-emerald-800">{printingBatch.batch.remaining_quantity} CS</span>
+                  <span className="text-[8px] font-bold text-zinc-600 uppercase block">CASES IN BATCH</span>
+                  <span className="text-xs font-mono font-black text-zinc-900">{printingBatch.batch.remaining_quantity} CS</span>
                 </div>
               </div>
 
               <div className="pt-1 flex justify-between items-center text-[10px]">
                 <div>
-                  <span className="text-[8px] font-bold text-slate-500 block uppercase">MANUFACTURED</span>
+                  <span className="text-[8px] font-bold text-zinc-500 block uppercase">MANUFACTURED</span>
                   <span className="font-mono font-bold">{printingBatch.batch.manufacture_date || 'N/A'}</span>
                 </div>
                 <div className="text-right">
-                  <span className="text-[8px] font-bold text-rose-700 block uppercase">EXPIRATION (FIFO)</span>
-                  <span className="font-mono font-black text-rose-800 text-xs">{printingBatch.batch.expiry_date}</span>
+                  <span className="text-[8px] font-bold text-red-700 block uppercase">EXPIRATION (FIFO)</span>
+                  <span className="font-mono font-black text-red-800 text-xs">{printingBatch.batch.expiry_date}</span>
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-slate-300 text-center">
-                <div className="h-8 bg-slate-900 w-full flex items-center justify-center space-x-1 px-2 rounded-sm">
+              <div className="pt-2 border-t border-zinc-300 text-center">
+                <div className="h-8 bg-zinc-900 w-full flex items-center justify-center space-x-1 px-2 rounded-xs">
                   {[1, 2, 1, 3, 1, 2, 4, 1, 2, 1, 3, 2, 1, 4, 2, 1, 3, 1, 2, 1, 4, 1].map((w, i) => (
                     <span key={i} className="bg-white h-full inline-block" style={{ width: `${w * 2}px` }} />
                   ))}
                 </div>
-                <span className="text-[8px] font-mono tracking-widest text-slate-700 uppercase block mt-1">
+                <span className="text-[8px] font-mono tracking-widest text-zinc-700 uppercase block mt-1">
                   *{printingBatch.batch.batch_number}*
                 </span>
               </div>
             </div>
 
-            <div className="flex justify-end space-x-3 pt-4 border-t border-slate-800 mt-4">
-              <button onClick={() => setPrintingBatch(null)} className="px-4 py-2 bg-slate-800 text-slate-300 text-xs rounded-xl">Cancel</button>
-              <button
+            <div className="flex justify-end space-x-2 pt-4 border-t border-zinc-200 mt-4">
+              <Button variant="outline" size="sm" onClick={() => setPrintingBatch(null)}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
                 onClick={() => window.print()}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/30 flex items-center space-x-2"
+                className="flex items-center space-x-1.5"
               >
-                <Printer className="w-4 h-4" />
-                <span>Print Sticker Label</span>
-              </button>
+                <Printer className="w-3.5 h-3.5" />
+                <span>Print Sticker</span>
+              </Button>
             </div>
           </div>
         </div>

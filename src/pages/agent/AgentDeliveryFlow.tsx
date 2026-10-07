@@ -3,7 +3,177 @@ import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
 import type { MicroStore, ReturnableItem, Truck } from '../../types/database.types';
-import { ShoppingBag, ArrowRight, Minus, Plus, Coins, CheckCircle2, Printer, FileText, AlertCircle, Check } from 'lucide-react';
+import {
+  ShoppingBag,
+  ArrowRight,
+  Minus,
+  Plus,
+  Coins,
+  CheckCircle2,
+  Printer,
+  FileText,
+  AlertCircle,
+  Check,
+  Trash2,
+} from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Badge } from '../../components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '../../components/ui/dialog';
+
+// Known brand clusters for strict brand-level container isolation
+const BRAND_GROUPS = [
+  { key: 'san_miguel', patterns: ['san miguel', 'smb', 'san mig', 'pale pilsen', 'super dry', 'cerveza negra', 'san mig light', 'miguel'] },
+  { key: 'red_horse', patterns: ['red horse', 'rh 1l', 'rh1l', 'extra strong', 'redhorse', 'rh'] },
+  { key: 'rc_cola', patterns: ['rc cola', 'rc', 'royal crown'] },
+  { key: 'coke', patterns: ['coca cola', 'coca-cola', 'coke', 'coke zero', 'sprite', 'royal'] },
+  { key: 'pepsi', patterns: ['pepsi', 'mountain dew', 'mirinda', '7up'] },
+  { key: 'ginebra', patterns: ['ginebra', 'gsm', 'san miguel ginebra'] },
+  { key: 'emperador', patterns: ['emperador', 'empe'] },
+  { key: 'tanduay', patterns: ['tanduay', 't5'] },
+  { key: 'heineken', patterns: ['heineken'] },
+  { key: 'corona', patterns: ['corona'] },
+];
+
+const getBrandKey = (text: string): string | null => {
+  const lower = (text || '').toLowerCase().trim();
+  for (const group of BRAND_GROUPS) {
+    for (const pat of group.patterns) {
+      if (lower.includes(pat)) {
+        return group.key;
+      }
+    }
+  }
+  return null;
+};
+
+// Helper to strictly resolve the exact matching returnable containers for a specific product
+const resolveProductContainers = (
+  prod: any,
+  catalog: ReturnableItem[]
+): { bottleItem: ReturnableItem | null; caseItem: ReturnableItem | null; isReturnable: boolean } => {
+  const pkg = prod?.product_packaging?.[0];
+  const isReturnable = pkg ? (pkg.is_returnable !== false) : true;
+  if (!isReturnable) {
+    return { bottleItem: null, caseItem: null, isReturnable: false };
+  }
+
+  const prodName = (prod?.name || '').trim();
+  const prodBrand = getBrandKey(prodName);
+
+  // Strict Brand Conflict Checker: reject any container that belongs to a different brand
+  const isBrandConflict = (r: ReturnableItem) => {
+    if (r.product_id && r.product_id === prod.id) return false;
+    const rBrand = getBrandKey((r.name || '') + ' ' + (r.code || ''));
+    if (prodBrand && rBrand && prodBrand !== rBrand) return true;
+    return false;
+  };
+
+  // 1. Find matching Bottle
+  let bottleItem: ReturnableItem | null = null;
+
+  // A. Check if directly linked by product_id
+  bottleItem = catalog.find(
+    (r) => r.product_id === prod.id && (r.item_type === 'BOTTLE' || r.type === 'BOTTLE')
+  ) || null;
+
+  // B. Check pkg.returnable_item_id if no brand conflict
+  if (!bottleItem && pkg?.returnable_item_id) {
+    const directRet = catalog.find((r) => r.id === pkg.returnable_item_id);
+    if (directRet && !isBrandConflict(directRet)) {
+      bottleItem = directRet;
+    }
+  }
+
+  // C. Match by brand / name
+  if (!bottleItem) {
+    bottleItem = catalog.find((r) => {
+      if (r.item_type !== 'BOTTLE' && r.type !== 'BOTTLE') return false;
+      if (isBrandConflict(r)) return false;
+      const rBrand = getBrandKey(r.name);
+      if (prodBrand && rBrand && prodBrand === rBrand) return true;
+      if (r.name.toLowerCase().includes(prodName.toLowerCase()) || prodName.toLowerCase().includes(r.name.toLowerCase())) return true;
+      return false;
+    }) || null;
+  }
+
+  // D. Fallback: Always generate a specific, perfectly named bottle item for this product
+  if (!bottleItem) {
+    bottleItem = {
+      id: `virtual-btl-${prod.id}`,
+      tenant_id: prod.tenant_id || '',
+      code: `RET-${(prod.sku || prodName).replace(/[^a-zA-Z0-9]/g, '-').toUpperCase()}-BTL`,
+      name: `${prodName} Bottle`,
+      item_type: 'BOTTLE',
+      type: 'BOTTLE',
+      deposit_rate: 10.00,
+      pundo_value: 10.00,
+      unit: 'bottle',
+      product_id: prod.id,
+      is_active: true,
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  // 2. Find matching Case
+  let caseItem: ReturnableItem | null = null;
+
+  // A. Check if directly linked by product_id
+  caseItem = catalog.find(
+    (r) => r.product_id === prod.id && (r.item_type === 'CASE' || r.type === 'CASE')
+  ) || null;
+
+  // B. Match by brand / name
+  if (!caseItem) {
+    caseItem = catalog.find((r) => {
+      if (r.item_type !== 'CASE' && r.type !== 'CASE') return false;
+      if (isBrandConflict(r)) return false;
+      const rBrand = getBrandKey(r.name);
+      if (prodBrand && rBrand && prodBrand === rBrand) return true;
+      if (r.name.toLowerCase().includes(prodName.toLowerCase()) || prodName.toLowerCase().includes(r.name.toLowerCase())) return true;
+      return false;
+    }) || null;
+  }
+
+  // C. Fallback: Always generate a specific, perfectly named case item for this product
+  if (!caseItem) {
+    caseItem = {
+      id: `virtual-case-${prod.id}`,
+      tenant_id: prod.tenant_id || '',
+      code: `RET-${(prod.sku || prodName).replace(/[^a-zA-Z0-9]/g, '-').toUpperCase()}-CASE`,
+      name: `${prodName} Case`,
+      item_type: 'CASE',
+      type: 'CASE',
+      deposit_rate: 50.00,
+      pundo_value: 50.00,
+      unit: 'case',
+      product_id: prod.id,
+      is_active: true,
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  return {
+    bottleItem,
+    caseItem,
+    isReturnable: true,
+  };
+};
 
 export const AgentDeliveryFlow: React.FC = () => {
   const { tenant } = useTenant();
@@ -28,39 +198,170 @@ export const AgentDeliveryFlow: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [promotionsCatalog, setPromotionsCatalog] = useState<any[]>([]);
+  const [selectedExtraReturnableId, setSelectedExtraReturnableId] = useState<string>('');
 
   const fetchDeliveryData = async () => {
     if (!tenant) return;
     try {
-      const [stRes, retsRes, promosRes, trkRes] = await Promise.all([
+      const [stRes, retsRes, promosRes] = await Promise.all([
         supabase.from('micro_stores').select('*').eq('tenant_id', tenant.id).order('store_name'),
-        supabase.from('returnable_items').select('*').eq('tenant_id', tenant.id),
+        supabase.from('returnable_items').select('*').eq('tenant_id', tenant.id).order('name'),
         supabase
           .from('promotions')
           .select('*')
           .eq('tenant_id', tenant.id)
           .eq('is_active', true),
-        supabase
+      ]);
+
+      const initialCatalog = retsRes.data || [];
+      setStores(stRes.data || []);
+      setReturnableCatalog(initialCatalog);
+      setPromotionsCatalog(promosRes.data || []);
+
+      let targetTruck: Truck | null = null;
+
+      if (profile?.id) {
+        const { data: agData } = await supabase
+          .from('agents')
+          .select('*, trucks(*)')
+          .eq('tenant_id', tenant.id)
+          .eq('user_id', profile.id)
+          .limit(1)
+          .maybeSingle();
+
+        if (agData?.trucks) {
+          targetTruck = agData.trucks;
+        } else if (agData?.assigned_truck_id) {
+          const { data: trk } = await supabase
+            .from('trucks')
+            .select('*')
+            .eq('id', agData.assigned_truck_id)
+            .maybeSingle();
+          targetTruck = trk;
+        }
+      }
+
+      if (!targetTruck) {
+        const { data: firstTrk } = await supabase
           .from('trucks')
           .select('*')
           .eq('tenant_id', tenant.id)
+          .order('truck_code')
           .limit(1)
-          .maybeSingle(),
-      ]);
+          .maybeSingle();
+        targetTruck = firstTrk;
+      }
 
-      setStores(stRes.data || []);
-      setReturnableCatalog(retsRes.data || []);
-      setPromotionsCatalog(promosRes.data || []);
-
-      const trkData = trkRes.data;
-      if (trkData) {
-        setTruck(trkData);
-        if (trkData.location_id) {
+      if (targetTruck) {
+        setTruck(targetTruck);
+        if (targetTruck.location_id) {
           const { data: bals } = await supabase
             .from('inventory_balances')
             .select('*, products(*, product_packaging(*), product_prices(*))')
-            .eq('location_id', trkData.location_id);
+            .eq('location_id', targetTruck.location_id);
+
           setTruckBalances(bals || []);
+
+          // Auto-sync product-matched returnables in the database
+          const workingCatalog: ReturnableItem[] = [...initialCatalog];
+          let catalogUpdated = false;
+
+          for (const b of bals || []) {
+            const prod = b.products;
+            if (!prod) continue;
+            const pkg = prod.product_packaging?.[0];
+            const isRet = pkg ? (pkg.is_returnable !== false) : true;
+            if (!isRet) continue;
+
+            const prodName = (prod.name || '').trim();
+            const prodBrand = getBrandKey(prodName);
+
+            // Check if matching bottle already exists in catalog
+            let existingBottle = workingCatalog.find(
+              (r) => (r.item_type === 'BOTTLE' || r.type === 'BOTTLE') &&
+                     (r.product_id === prod.id || (prodBrand && getBrandKey(r.name) === prodBrand) || r.name.toLowerCase().includes(prodName.toLowerCase()))
+            );
+
+            if (!existingBottle) {
+              const bottleCode = `RET-${(prod.sku || prodName).replace(/[^a-zA-Z0-9]/g, '-').toUpperCase()}-BTL`;
+              const { data: newBtl } = await supabase
+                .from('returnable_items')
+                .upsert(
+                  [
+                    {
+                      tenant_id: tenant.id,
+                      code: bottleCode,
+                      name: `${prodName} Bottle`,
+                      item_type: 'BOTTLE',
+                      type: 'BOTTLE',
+                      deposit_rate: 10.00,
+                      pundo_value: 10.00,
+                      unit: 'bottle',
+                      product_id: prod.id,
+                      is_active: true,
+                    },
+                  ],
+                  { onConflict: 'tenant_id,code' }
+                )
+                .select()
+                .maybeSingle();
+
+              if (newBtl) {
+                existingBottle = newBtl;
+                workingCatalog.push(newBtl);
+                catalogUpdated = true;
+              }
+            }
+
+            // Check if matching case already exists in catalog
+            let existingCase = workingCatalog.find(
+              (r) => (r.item_type === 'CASE' || r.type === 'CASE') &&
+                     (r.product_id === prod.id || (prodBrand && getBrandKey(r.name) === prodBrand) || r.name.toLowerCase().includes(prodName.toLowerCase()))
+            );
+
+            if (!existingCase) {
+              const caseCode = `RET-${(prod.sku || prodName).replace(/[^a-zA-Z0-9]/g, '-').toUpperCase()}-CASE`;
+              const { data: newCs } = await supabase
+                .from('returnable_items')
+                .upsert(
+                  [
+                    {
+                      tenant_id: tenant.id,
+                      code: caseCode,
+                      name: `${prodName} Case`,
+                      item_type: 'CASE',
+                      type: 'CASE',
+                      deposit_rate: 50.00,
+                      pundo_value: 50.00,
+                      unit: 'case',
+                      product_id: prod.id,
+                      is_active: true,
+                    },
+                  ],
+                  { onConflict: 'tenant_id,code' }
+                )
+                .select()
+                .maybeSingle();
+
+              if (newCs) {
+                existingCase = newCs;
+                workingCatalog.push(newCs);
+                catalogUpdated = true;
+              }
+            }
+
+            // If pkg.returnable_item_id is misaligned, link it properly to the matching bottle
+            if (existingBottle && pkg && pkg.returnable_item_id !== existingBottle.id) {
+              await supabase
+                .from('product_packaging')
+                .update({ returnable_item_id: existingBottle.id })
+                .eq('id', pkg.id);
+            }
+          }
+
+          if (catalogUpdated) {
+            setReturnableCatalog(workingCatalog);
+          }
         }
       }
     } catch (err) {
@@ -70,7 +371,7 @@ export const AgentDeliveryFlow: React.FC = () => {
 
   useEffect(() => {
     fetchDeliveryData();
-  }, [tenant]);
+  }, [tenant, profile]);
 
   const updateCartQty = (prodBal: any, delta: number) => {
     const prod = prodBal.products;
@@ -117,15 +418,68 @@ export const AgentDeliveryFlow: React.FC = () => {
     });
   };
 
-  // Preserve entered return quantities when navigating between steps
+  // 1. Delivered Products & Return Requirements Calculation
+  let totalDeliveredCases = 0;
+  let totalDeliveredBottles = 0;
+  let totalRequiredBottles = 0;
+  let totalRequiredCases = 0;
+  let cartTotal = 0;
+
+  // Map of returnable_item_id -> { item, requiredQty, sourceProducts }
+  const requiredByReturnableId = new Map<string, { item: ReturnableItem; requiredQty: number; sourceProducts: string[] }>();
+
+  cart.forEach((val) => {
+    const { product, qtyCases, casePrice, unitsPerCase } = val;
+    totalDeliveredCases += qtyCases;
+    totalDeliveredBottles += qtyCases * unitsPerCase;
+    cartTotal += qtyCases * casePrice;
+
+    const { bottleItem, caseItem, isReturnable } = resolveProductContainers(product, returnableCatalog);
+    if (isReturnable) {
+      const bQty = qtyCases * unitsPerCase;
+      const cQty = qtyCases;
+
+      totalRequiredBottles += bQty;
+      totalRequiredCases += cQty;
+
+      if (bottleItem) {
+        const existing = requiredByReturnableId.get(bottleItem.id) || { item: bottleItem, requiredQty: 0, sourceProducts: [] };
+        existing.requiredQty += bQty;
+        if (!existing.sourceProducts.includes(product.name)) existing.sourceProducts.push(product.name);
+        requiredByReturnableId.set(bottleItem.id, existing);
+      }
+
+      if (caseItem) {
+        const existing = requiredByReturnableId.get(caseItem.id) || { item: caseItem, requiredQty: 0, sourceProducts: [] };
+        existing.requiredQty += cQty;
+        if (!existing.sourceProducts.includes(product.name)) existing.sourceProducts.push(product.name);
+        requiredByReturnableId.set(caseItem.id, existing);
+      }
+    }
+  });
+
+  // Prepare Step 3: Populate ONLY returnables strictly associated with the delivered products in cart
   const prepareReturnablesStep = () => {
     setReturnsMap((prev) => {
-      const nextReturns = new Map(prev);
-      returnableCatalog.forEach((item) => {
-        if (!nextReturns.has(item.id)) {
-          nextReturns.set(item.id, { item, returnedQty: 0 });
+      const nextReturns = new Map<string, { item: ReturnableItem; returnedQty: number }>();
+
+      // 1. Add all returnables strictly required by the current cart
+      // Default to 1:1 complete return exchange (requiredQty) for standard beverage delivery workflow
+      requiredByReturnableId.forEach(({ item, requiredQty }) => {
+        const existing = prev.get(item.id);
+        nextReturns.set(item.id, {
+          item,
+          returnedQty: existing !== undefined ? existing.returnedQty : requiredQty,
+        });
+      });
+
+      // 2. Preserve manually added extra returnables with returnedQty > 0
+      prev.forEach(({ item, returnedQty }) => {
+        if (returnedQty > 0 && !nextReturns.has(item.id)) {
+          nextReturns.set(item.id, { item, returnedQty });
         }
       });
+
       return nextReturns;
     });
     setStep(3);
@@ -153,31 +507,95 @@ export const AgentDeliveryFlow: React.FC = () => {
     });
   };
 
-  // 1. Delivered Products & Subtotal Calculation
-  let totalDeliveredCases = 0;
-  let totalDeliveredBottles = 0;
-  let cartTotal = 0;
+  const handleAddExtraReturnable = (returnableId: string) => {
+    const item = returnableCatalog.find((r) => r.id === returnableId);
+    if (!item) return;
+    setReturnsMap((prev) => {
+      const next = new Map(prev);
+      if (!next.has(item.id)) {
+        next.set(item.id, { item, returnedQty: 0 });
+      }
+      return next;
+    });
+    setSelectedExtraReturnableId('');
+  };
 
-  cart.forEach((val) => {
-    totalDeliveredCases += val.qtyCases;
-    totalDeliveredBottles += val.qtyCases * val.unitsPerCase;
-    cartTotal += val.qtyCases * val.casePrice;
-  });
+  const handleRemoveExtraReturnable = (returnableId: string) => {
+    setReturnsMap((prev) => {
+      const next = new Map(prev);
+      next.delete(returnableId);
+      return next;
+    });
+  };
 
-  // 2. Returned Containers Calculation
-  let totalReturnedBottles = 0;
-  let totalReturnedCases = 0;
+  // 2. Deposit Breakdown, Shortage & Surplus Calculations per Returnable Item
+  let totalBottlePundoCharge = 0;
+  let totalCasePundoCharge = 0;
+  let totalEmptiesCredit = 0;
+
+  const allActiveReturnableIds = new Set([
+    ...Array.from(requiredByReturnableId.keys()),
+    ...Array.from(returnsMap.keys()),
+  ]);
+
+  interface ReturnableBreakdownRow {
+    item: ReturnableItem;
+    requiredQty: number;
+    returnedQty: number;
+    rate: number;
+    shortage: number;
+    charge: number;
+    surplus: number;
+    credit: number;
+    isBottle: boolean;
+    isCase: boolean;
+    sourceProducts: string[];
+  }
+
+  const breakdownList: ReturnableBreakdownRow[] = [];
   const returnedItemsList: { item: ReturnableItem; returnedQty: number; rate: number; totalValue: number }[] = [];
 
-  returnsMap.forEach(({ item, returnedQty }) => {
+  allActiveReturnableIds.forEach((id) => {
+    const reqObj = requiredByReturnableId.get(id);
+    const retObj = returnsMap.get(id);
+    const item = reqObj?.item || retObj?.item || returnableCatalog.find((r) => r.id === id);
+    if (!item) return;
+
+    const requiredQty = reqObj?.requiredQty || 0;
+    const returnedQty = retObj?.returnedQty || 0;
+    const rate = Number(item.deposit_rate || item.pundo_value || 0);
+
+    const isBottle = item.item_type === 'BOTTLE' || item.type === 'BOTTLE';
+    const isCase = item.item_type === 'CASE' || item.type === 'CASE';
+
+    const shortage = Math.max(0, requiredQty - returnedQty);
+    const charge = shortage * rate;
+
+    const surplus = Math.max(0, returnedQty - requiredQty);
+    const credit = surplus * rate;
+
+    if (isBottle) {
+      totalBottlePundoCharge += charge;
+    } else {
+      totalCasePundoCharge += charge;
+    }
+    totalEmptiesCredit += credit;
+
+    breakdownList.push({
+      item,
+      requiredQty,
+      returnedQty,
+      rate,
+      shortage,
+      charge,
+      surplus,
+      credit,
+      isBottle,
+      isCase,
+      sourceProducts: reqObj?.sourceProducts || [],
+    });
+
     if (returnedQty > 0) {
-      const rate = Number(item.deposit_rate || item.pundo_value || 0);
-      const isBottle = item.item_type === 'BOTTLE' || item.type === 'BOTTLE';
-      const isCase = item.item_type === 'CASE' || item.type === 'CASE';
-
-      if (isBottle) totalReturnedBottles += returnedQty;
-      if (isCase) totalReturnedCases += returnedQty;
-
       returnedItemsList.push({
         item,
         returnedQty,
@@ -187,27 +605,15 @@ export const AgentDeliveryFlow: React.FC = () => {
     }
   });
 
-  // 3. Container Exchange & Lacking PUNDO Calculation
-  const bottleItem = returnableCatalog.find((r) => r.item_type === 'BOTTLE' || r.type === 'BOTTLE');
-  const plasticCaseItem = returnableCatalog.find((r) => r.item_type === 'CASE' || r.type === 'CASE');
+  const totalShortageBottles = breakdownList
+    .filter((r) => r.isBottle)
+    .reduce((sum, r) => sum + r.shortage, 0);
 
-  const bottlePundoRate = Number(bottleItem?.deposit_rate || bottleItem?.pundo_value || 3.00);
-  const casePundoRate = Number(plasticCaseItem?.deposit_rate || plasticCaseItem?.pundo_value || 50.00);
+  const totalShortageCases = breakdownList
+    .filter((r) => r.isCase)
+    .reduce((sum, r) => sum + r.shortage, 0);
 
-  // Shortage (Lacking Containers)
-  const lackingBottles = Math.max(0, totalDeliveredBottles - totalReturnedBottles);
-  const lackingCases = Math.max(0, totalDeliveredCases - totalReturnedCases);
-
-  // Surplus Empties Returned (Credit/Refund)
-  const surplusBottles = Math.max(0, totalReturnedBottles - totalDeliveredBottles);
-  const surplusCases = Math.max(0, totalReturnedCases - totalDeliveredCases);
-
-  // PUNDO Amounts
-  const bottlePundoCharge = lackingBottles * bottlePundoRate;
-  const casePundoCharge = lackingCases * casePundoRate;
-  const extraEmptiesCredit = (surplusBottles * bottlePundoRate) + (surplusCases * casePundoRate);
-
-  const netPundoDepositDue = bottlePundoCharge + casePundoCharge - extraEmptiesCredit;
+  const netPundoDepositDue = (totalBottlePundoCharge + totalCasePundoCharge) - totalEmptiesCredit;
   const netTotalPayable = Math.max(0, cartTotal + netPundoDepositDue);
 
   const handleConfirmDelivery = async () => {
@@ -216,7 +622,6 @@ export const AgentDeliveryFlow: React.FC = () => {
     setErrorMsg(null);
 
     try {
-      // Resolve valid Agent ID (FK to agents table)
       let activeAgentId: string | null = null;
       if (profile?.id) {
         const { data: agtByUserId } = await supabase
@@ -274,8 +679,8 @@ export const AgentDeliveryFlow: React.FC = () => {
 
       const fullPayload = {
         ...basePayload,
-        bottle_pundo_amount: bottlePundoCharge,
-        case_pundo_amount: casePundoCharge,
+        bottle_pundo_amount: totalBottlePundoCharge,
+        case_pundo_amount: totalCasePundoCharge,
         payment_status: 'PAID',
         delivery_status: 'DELIVERED',
       };
@@ -295,7 +700,6 @@ export const AgentDeliveryFlow: React.FC = () => {
         const promoClaimsPayload: any[] = [];
 
         for (const [prodId, val] of cart.entries()) {
-          // Paid Line Item
           saleItemsPayload.push({
             sale_id: sale.id,
             product_id: prodId,
@@ -306,7 +710,6 @@ export const AgentDeliveryFlow: React.FC = () => {
             is_promo_free: false,
           });
 
-          // Check if product qualifies for active promo (e.g. 5+1 deal)
           const activePromo = promotionsCatalog.find((p) => p.buy_product_id === prodId && p.is_active);
           if (activePromo) {
             const buyQty = Number(activePromo.buy_quantity || 5);
@@ -315,7 +718,6 @@ export const AgentDeliveryFlow: React.FC = () => {
             const totalFreeCases = promoDeals * freeQtyPerDeal;
 
             if (totalFreeCases > 0) {
-              // Promo Free Line Item
               saleItemsPayload.push({
                 sale_id: sale.id,
                 product_id: activePromo.free_product_id || prodId,
@@ -327,7 +729,6 @@ export const AgentDeliveryFlow: React.FC = () => {
                 promo_id: activePromo.id,
               });
 
-              // Supplier Claim Ledger Entry
               promoClaimsPayload.push({
                 tenant_id: tenant.id,
                 promo_id: activePromo.id,
@@ -349,19 +750,27 @@ export const AgentDeliveryFlow: React.FC = () => {
         if (saleItemsPayload.length > 0) {
           const { error: sItemsErr } = await supabase.from('sale_items').insert(saleItemsPayload);
           if (sItemsErr) {
-            console.error('Error inserting sale_items:', sItemsErr);
+            console.warn('Initial sale_items insert failed (missing column), retrying with base columns:', sItemsErr.message);
+            const fallbackPayload = saleItemsPayload.map(({ sale_id, product_id, quantity, unit_price, unit }) => ({
+              sale_id,
+              product_id,
+              quantity,
+              unit_price,
+              unit: unit || 'case',
+            }));
+            const { error: fbErr } = await supabase.from('sale_items').insert(fallbackPayload);
+            if (fbErr) console.error('Fallback sale_items insert error:', fbErr);
+            else console.log('✅ sale_items inserted successfully via fallback payload');
           }
         }
 
         if (promoClaimsPayload.length > 0) {
           const { error: claimErr } = await supabase.from('supplier_promo_claims').insert(promoClaimsPayload);
-          if (claimErr) {
-            console.error('Error inserting supplier_promo_claims:', claimErr);
-          }
+          if (claimErr) console.error('Error inserting supplier_promo_claims:', claimErr);
         }
       }
 
-      // 3. Deduct Truck Inventory Balance (Paid Cases + Promo Free Cases)
+      // 3. Deduct Truck Inventory Balance
       for (const [prodId, val] of cart.entries()) {
         const bal = truckBalances.find((b) => b.product_id === prodId);
         if (bal) {
@@ -382,99 +791,129 @@ export const AgentDeliveryFlow: React.FC = () => {
         }
       }
 
-      // 4. Record PUNDO Ledger Entries for Lacking Container Charges
-      if (bottleItem && lackingBottles > 0) {
-        const { data: latestEntry } = await supabase
-          .from('pundo_ledger')
-          .select('balance_quantity')
-          .eq('tenant_id', tenant.id)
-          .eq('micro_store_id', selectedStore.id)
-          .eq('returnable_item_id', bottleItem.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+      // 4. Record PUNDO Ledger Entries & Update Truck Returnable Balances
+      for (const row of breakdownList) {
+        let realReturnableId = row.item.id;
 
-        const prevBal = Number(latestEntry?.balance_quantity || 0);
-        const newBal = prevBal + lackingBottles;
-        const newVal = newBal * bottlePundoRate;
+        // If this returnable was a newly generated virtual item, persist it in returnable_items first
+        if (realReturnableId.startsWith('virtual-') || realReturnableId.startsWith('btl-') || realReturnableId.startsWith('case-')) {
+          const { data: existingRet } = await supabase
+            .from('returnable_items')
+            .select('id')
+            .eq('tenant_id', tenant.id)
+            .or(`code.eq.${row.item.code},name.eq.${row.item.name}`)
+            .limit(1)
+            .maybeSingle();
 
-        await supabase.from('pundo_ledger').insert([
-          {
-            tenant_id: tenant.id,
-            micro_store_id: selectedStore.id,
-            returnable_item_id: bottleItem.id,
-            transaction_type: 'DELIVERED_CONTAINER',
-            quantity_change: lackingBottles,
-            pundo_rate: bottlePundoRate,
-            balance_quantity: newBal,
-            balance_value: newVal,
-            reference_id: sale.id,
-          },
-        ]);
-      }
+          if (existingRet?.id) {
+            realReturnableId = existingRet.id;
+          } else {
+            const { data: insertedRet, error: insErr } = await supabase
+              .from('returnable_items')
+              .insert([
+                {
+                  tenant_id: tenant.id,
+                  code: row.item.code,
+                  name: row.item.name,
+                  item_type: row.item.item_type || row.item.type,
+                  type: row.item.type || row.item.item_type,
+                  deposit_rate: row.rate,
+                  pundo_value: row.rate,
+                  unit: row.item.unit || (row.isBottle ? 'bottle' : 'case'),
+                  product_id: row.item.product_id || null,
+                  is_active: true,
+                },
+              ])
+              .select('id')
+              .maybeSingle();
 
-      if (plasticCaseItem && lackingCases > 0) {
-        const { data: latestCaseEntry } = await supabase
-          .from('pundo_ledger')
-          .select('balance_quantity')
-          .eq('tenant_id', tenant.id)
-          .eq('micro_store_id', selectedStore.id)
-          .eq('returnable_item_id', plasticCaseItem.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+            if (insertedRet?.id) {
+              realReturnableId = insertedRet.id;
+            } else {
+              console.warn('Could not insert returnable item, re-querying:', insErr);
+              const { data: retryRet } = await supabase
+                .from('returnable_items')
+                .select('id')
+                .eq('tenant_id', tenant.id)
+                .eq('name', row.item.name)
+                .limit(1)
+                .maybeSingle();
+              if (retryRet?.id) realReturnableId = retryRet.id;
+            }
+          }
+        }
 
-        const prevBal = Number(latestCaseEntry?.balance_quantity || 0);
-        const newBal = prevBal + lackingCases;
-        const newVal = newBal * casePundoRate;
+        // Validate UUID syntax before passing to Postgres UUID columns to avoid HTTP 400
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(realReturnableId);
+        if (!isUUID) {
+          console.error(`⚠️ Skipping invalid non-UUID returnable_id: ${realReturnableId}`);
+          continue;
+        }
 
-        await supabase.from('pundo_ledger').insert([
-          {
-            tenant_id: tenant.id,
-            micro_store_id: selectedStore.id,
-            returnable_item_id: plasticCaseItem.id,
-            transaction_type: 'DELIVERED_CONTAINER',
-            quantity_change: lackingCases,
-            pundo_rate: casePundoRate,
-            balance_quantity: newBal,
-            balance_value: newVal,
-            reference_id: sale.id,
-          },
-        ]);
-      }
-
-      // 5. Record Returned Empties in PUNDO Ledger & Update Truck Empties Inventory
-      for (const { item: retItem, returnedQty } of returnsMap.values()) {
-        if (returnedQty > 0) {
-          const rate = Number(retItem.deposit_rate || retItem.pundo_value || 0);
-
-          const { data: latestRetEntry } = await supabase
+        // Record DELIVERED_CONTAINER for any lacking containers (shortage)
+        if (row.shortage > 0) {
+          const { data: latestEntry } = await supabase
             .from('pundo_ledger')
             .select('balance_quantity')
             .eq('tenant_id', tenant.id)
             .eq('micro_store_id', selectedStore.id)
-            .eq('returnable_item_id', retItem.id)
+            .eq('returnable_item_id', realReturnableId)
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-          const prevBal = Number(latestRetEntry?.balance_quantity || 0);
-          const newBal = Math.max(0, prevBal - returnedQty);
-          const newVal = newBal * rate;
+          const prevBal = Number(latestEntry?.balance_quantity || 0);
+          const newBal = prevBal + row.shortage;
+          const newVal = newBal * row.rate;
 
-          await supabase.from('pundo_ledger').insert([
+          const { error: delivErr } = await supabase.from('pundo_ledger').insert([
             {
               tenant_id: tenant.id,
               micro_store_id: selectedStore.id,
-              returnable_item_id: retItem.id,
-              transaction_type: 'RETURNED_EMPTY',
-              quantity_change: -returnedQty,
-              pundo_rate: rate,
+              returnable_item_id: realReturnableId,
+              transaction_type: 'DELIVERED_CONTAINER',
+              quantity_change: row.shortage,
+              pundo_rate: row.rate,
               balance_quantity: newBal,
               balance_value: newVal,
               reference_id: sale.id,
             },
           ]);
+          if (delivErr) console.error('❌ Error inserting DELIVERED_CONTAINER into pundo_ledger:', delivErr);
+          else console.log(`✅ [pundo_ledger] Logged DELIVERED_CONTAINER for ${row.item.name}: +${row.shortage}`);
+        }
+
+        // Record RETURNED_EMPTY for all actual empties returned
+        if (row.returnedQty > 0) {
+          const { data: latestRetEntry } = await supabase
+            .from('pundo_ledger')
+            .select('balance_quantity')
+            .eq('tenant_id', tenant.id)
+            .eq('micro_store_id', selectedStore.id)
+            .eq('returnable_item_id', realReturnableId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          const prevBal = Number(latestRetEntry?.balance_quantity || 0);
+          const newBal = Math.max(0, prevBal - row.returnedQty);
+          const newVal = newBal * row.rate;
+
+          const { error: pundoErr } = await supabase.from('pundo_ledger').insert([
+            {
+              tenant_id: tenant.id,
+              micro_store_id: selectedStore.id,
+              returnable_item_id: realReturnableId,
+              transaction_type: 'RETURNED_EMPTY',
+              quantity_change: -row.returnedQty,
+              pundo_rate: row.rate,
+              balance_quantity: newBal,
+              balance_value: newVal,
+              reference_id: sale.id,
+            },
+          ]);
+          if (pundoErr) console.error('❌ Error inserting RETURNED_EMPTY into pundo_ledger:', pundoErr);
+          else console.log(`✅ [pundo_ledger] Logged RETURNED_EMPTY for ${row.item.name}: -${row.returnedQty}`);
 
           if (truck.location_id) {
             const { data: existingTrkBal } = await supabase
@@ -482,27 +921,30 @@ export const AgentDeliveryFlow: React.FC = () => {
               .select('id, quantity')
               .eq('tenant_id', tenant.id)
               .eq('location_id', truck.location_id)
-              .eq('returnable_item_id', retItem.id)
+              .eq('returnable_item_id', realReturnableId)
               .limit(1)
               .maybeSingle();
 
             if (existingTrkBal) {
+              const updatedQty = Number(existingTrkBal.quantity || 0) + Number(row.returnedQty);
               await supabase
                 .from('returnable_balances')
                 .update({
-                  quantity: Number(existingTrkBal.quantity || 0) + Number(returnedQty),
+                  quantity: updatedQty,
                   updated_at: new Date().toISOString(),
                 })
                 .eq('id', existingTrkBal.id);
+              console.log(`📦 [AgentDeliveryFlow] Updated truck returnable balance (${row.item.name}): +${row.returnedQty} (New total: ${updatedQty})`);
             } else {
               await supabase.from('returnable_balances').insert([
                 {
                   tenant_id: tenant.id,
                   location_id: truck.location_id,
-                  returnable_item_id: retItem.id,
-                  quantity: Number(returnedQty),
+                  returnable_item_id: realReturnableId,
+                  quantity: Number(row.returnedQty),
                 },
               ]);
+              console.log(`📦 [AgentDeliveryFlow] Inserted truck returnable balance (${row.item.name}): ${row.returnedQty}`);
             }
           }
         }
@@ -518,22 +960,26 @@ export const AgentDeliveryFlow: React.FC = () => {
     }
   };
 
+  // Available unused containers in catalog for extra surplus return
+  const availableExtraContainers = returnableCatalog.filter((r) => !returnsMap.has(r.id));
+
   return (
-    <div className="space-y-6 max-w-md mx-auto pb-20">
+    <div className="space-y-6 max-w-lg mx-auto pb-20">
       {/* Header Wizard Indicator */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-        <div className="flex items-center space-x-2">
-          <ShoppingBag className="w-5 h-5 text-indigo-400" />
-          <h1 className="text-lg font-extrabold text-white">
-            New Delivery <span className="text-xs text-slate-400 font-normal">Step {step} of 4</span>
-          </h1>
+      <div className="flex items-center justify-between border-b border-zinc-200 pb-4">
+        <div className="flex items-center gap-2">
+          <ShoppingBag className="w-5 h-5 text-zinc-700" />
+          <div>
+            <h1 className="text-lg font-bold text-zinc-900">Store Delivery</h1>
+            <span className="text-xs text-zinc-500">Step {step} of 4</span>
+          </div>
         </div>
-        <div className="flex space-x-1.5">
+        <div className="flex gap-1.5">
           {[1, 2, 3, 4].map((i) => (
-            <span
+            <div
               key={i}
-              className={`w-5 h-1.5 rounded-full transition-all ${
-                i <= step ? 'bg-indigo-500' : 'bg-slate-800'
+              className={`h-2 rounded-full transition-all ${
+                i === step ? 'w-6 bg-zinc-900' : i < step ? 'w-4 bg-zinc-700' : 'w-4 bg-zinc-200'
               }`}
             />
           ))}
@@ -541,523 +987,651 @@ export const AgentDeliveryFlow: React.FC = () => {
       </div>
 
       {errorMsg && (
-        <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-2xl text-xs font-semibold flex items-center space-x-2">
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-xs flex items-center gap-2">
           <AlertCircle className="w-4 h-4 shrink-0" />
           <span>{errorMsg}</span>
         </div>
       )}
 
+      {/* STEP 1: Select Micro-Store */}
       {step === 1 && (
         <div className="space-y-4">
-          <h2 className="text-sm font-bold text-slate-300 uppercase tracking-wider">Select Micro Store Destination</h2>
+          <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Select Store Destination</h2>
           {stores.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 text-xs bg-slate-900 border border-slate-800 rounded-2xl">
-              No micro stores found in route directory.
+            <div className="p-8 text-center text-zinc-400 text-xs border border-dashed border-zinc-200 rounded-lg">
+              No registered micro-stores found. Register stores in admin portal.
             </div>
           ) : (
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               {stores.map((s) => (
-                <div
+                <Card
                   key={s.id}
                   onClick={() => {
                     setSelectedStore(s);
                     setStep(2);
                   }}
-                  className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
-                    selectedStore?.id === s.id
-                      ? 'bg-indigo-600/10 border-indigo-500 text-white'
-                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
+                  className={`cursor-pointer transition hover:border-zinc-400 ${
+                    selectedStore?.id === s.id ? 'border-zinc-900 ring-1 ring-zinc-900' : ''
                   }`}
                 >
-                  <div>
-                    <h3 className="font-extrabold text-base text-white">{s.store_name}</h3>
-                    <p className="text-xs text-slate-400">Code: <span className="font-mono text-indigo-300">{s.store_code}</span> • Owner: {s.owner_name || 'N/A'}</p>
-                  </div>
-                  <ArrowRight className="w-5 h-5 text-slate-500" />
-                </div>
+                  <CardContent className="p-4 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-base text-zinc-900">{s.store_name}</span>
+                        <Badge variant="outline" className="font-mono text-xs">
+                          {s.store_code}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-zinc-500 mt-1">Owner: {s.owner_name || 'N/A'}</p>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-zinc-400" />
+                  </CardContent>
+                </Card>
               ))}
             </div>
           )}
         </div>
       )}
 
+      {/* STEP 2: Select Products to Deliver */}
       {step === 2 && (
         <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl flex items-center justify-between text-xs">
+          <div className="bg-zinc-50 border border-zinc-200 p-3 rounded-lg flex items-center justify-between text-xs">
             <div>
-              <span className="text-slate-500 uppercase font-mono block text-[10px]">SELECTED STORE</span>
-              <strong className="text-white text-sm">{selectedStore?.store_name}</strong>
+              <span className="text-zinc-500 uppercase font-mono block text-[10px]">SELECTED STORE</span>
+              <strong className="text-zinc-900 text-sm font-semibold">{selectedStore?.store_name}</strong>
             </div>
-            <button onClick={() => setStep(1)} className="text-indigo-400 hover:underline">Change</button>
+            <Button variant="ghost" size="sm" onClick={() => setStep(1)} className="h-7 text-xs">
+              Change
+            </Button>
           </div>
 
-          <h2 className="text-sm font-bold text-slate-300 uppercase tracking-wider">Select Product Cases to Deliver</h2>
+          <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Products to Deliver</h2>
 
           {truckBalances.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 text-xs bg-slate-900 border border-slate-800 rounded-2xl">
+            <div className="p-8 text-center text-zinc-400 text-xs border border-dashed border-zinc-200 rounded-lg">
               No product stock loaded on truck. Transfer cases from main warehouse first.
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {truckBalances.map((bal) => {
                 const prod = bal.products;
                 const pkg = prod?.product_packaging?.[0];
                 const units = Number(pkg?.units_per_package || pkg?.units_per_case || 24);
+                const isRet = pkg ? (pkg.is_returnable !== false) : true;
                 const inCart = cart.get(prod.id);
                 const currentQty = inCart ? inCart.qtyCases : 0;
                 const maxStock = Number(bal.quantity || 0);
 
                 return (
-                  <div key={bal.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h4 className="font-bold text-white text-base">{prod?.name}</h4>
-                        <p className="text-xs text-slate-400">
-                          Available: <strong className="text-emerald-400 font-mono">{maxStock} cases</strong> (1 case = {units} btls)
-                        </p>
+                  <Card key={bal.id}>
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-bold text-zinc-900 text-base">{prod?.name}</h4>
+                            {!isRet && (
+                              <Badge variant="secondary" className="text-[10px] uppercase font-mono">
+                                Non-Returnable
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-zinc-500">
+                            Available: <strong className="text-zinc-900 font-mono">{maxStock} cases</strong> ({units} btls/case)
+                          </p>
 
-                        {/* Active Promo Badge */}
-                        {(() => {
-                          const activePromo = promotionsCatalog.find((p) => p.buy_product_id === prod.id && p.is_active);
-                          if (!activePromo) return null;
+                          {/* Active Promo Badge */}
+                          {(() => {
+                            const activePromo = promotionsCatalog.find((p) => p.buy_product_id === prod.id && p.is_active);
+                            if (!activePromo) return null;
 
-                          const buyQty = Number(activePromo.buy_quantity || 5);
-                          const freeQtyPerDeal = Number(activePromo.free_quantity || 1);
-                          const deals = Math.floor(currentQty / buyQty);
-                          const freeCs = deals * freeQtyPerDeal;
+                            const buyQty = Number(activePromo.buy_quantity || 5);
+                            const freeQtyPerDeal = Number(activePromo.free_quantity || 1);
+                            const deals = Math.floor(currentQty / buyQty);
+                            const freeCs = deals * freeQtyPerDeal;
 
-                          return (
-                            <div className="mt-1 space-y-1">
-                              <span className="text-[10px] font-mono font-bold text-pink-400 bg-pink-500/10 border border-pink-500/20 px-2 py-0.5 rounded-lg inline-flex items-center gap-1">
-                                🎉 PROMO: Buy {buyQty} cs $\rightarrow$ Get +{freeQtyPerDeal} cs FREE (San Miguel Funded)
-                              </span>
+                            return (
+                              <div className="mt-1 space-y-1">
+                                <Badge variant="secondary" className="text-[10px]">
+                                  Promo: Buy {buyQty} &rarr; +{freeQtyPerDeal} FREE
+                                </Badge>
 
-                              {freeCs > 0 && (
-                                <div className="text-[11px] font-mono font-extrabold text-emerald-400">
-                                  🎁 +{freeCs} FREE Promo Cases automatically added at ₱0.00!
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
+                                {freeCs > 0 && (
+                                  <div className="text-[11px] font-mono font-bold text-zinc-900">
+                                    +{freeCs} Free Promo Cases applied
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+
+                        <div className="flex items-center gap-1.5 bg-zinc-50 p-1 rounded-lg border border-zinc-200 shrink-0">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => updateCartQty(bal, -1)}
+                            className="h-8 w-8"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </Button>
+
+                          <Input
+                            type="number"
+                            min="0"
+                            max={maxStock}
+                            value={currentQty === 0 ? '' : currentQty}
+                            placeholder="0"
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              setCartQtyDirect(bal, isNaN(val) ? 0 : val);
+                            }}
+                            className="w-14 text-center font-bold text-base font-mono h-8 p-0"
+                          />
+
+                          <Button
+                            variant="default"
+                            size="icon"
+                            onClick={() => updateCartQty(bal, 1)}
+                            className="h-8 w-8"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
                       </div>
-
-                      <div className="flex items-center space-x-2 bg-slate-950 px-2 py-1.5 rounded-2xl border border-slate-800 shrink-0">
-                        <button
-                          onClick={() => updateCartQty(bal, -1)}
-                          className="w-9 h-9 rounded-xl bg-slate-800 text-white flex items-center justify-center font-bold shrink-0 active:scale-95"
-                        >
-                          <Minus className="w-4 h-4" />
-                        </button>
-
-                        <input
-                          type="number"
-                          min="0"
-                          max={maxStock}
-                          value={currentQty === 0 ? '' : currentQty}
-                          placeholder="0"
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            setCartQtyDirect(bal, isNaN(val) ? 0 : val);
-                          }}
-                          className="w-14 text-center font-extrabold text-lg text-white font-mono bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded-lg py-1 border border-slate-800"
-                        />
-
-                        <button
-                          onClick={() => updateCartQty(bal, 1)}
-                          className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold shrink-0 active:scale-95"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                    </CardContent>
+                  </Card>
                 );
               })}
             </div>
           )}
 
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-2 text-xs">
-            <div className="flex justify-between text-slate-300">
-              <span>Delivered Cases: <strong className="text-white">{totalDeliveredCases} cases</strong></span>
-              <span>Calculated Bottles: <strong className="text-indigo-400">{totalDeliveredBottles} btls</strong></span>
+          <div className="bg-zinc-50 border border-zinc-200 p-4 rounded-lg space-y-2 text-xs">
+            <div className="flex justify-between text-zinc-600">
+              <span>Delivered: <strong className="text-zinc-900">{totalDeliveredCases} cases</strong></span>
+              <span>Total Units: <strong className="text-zinc-900">{totalDeliveredBottles} bottles</strong></span>
             </div>
-            <div className="flex justify-between text-base font-black text-white pt-2 border-t border-slate-800">
-              <span>Product Case Subtotal:</span>
-              <span className="text-emerald-400 font-mono">₱{cartTotal.toFixed(2)}</span>
+            <div className="flex justify-between text-sm font-bold text-zinc-900 pt-2 border-t border-zinc-200">
+              <span>Product Subtotal:</span>
+              <span className="font-mono">₱{cartTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           </div>
 
-          <div className="flex space-x-3 pt-2">
-            <button onClick={() => setStep(1)} className="w-1/3 py-4 rounded-2xl bg-slate-800 text-slate-300 font-bold text-sm">Back</button>
-            <button
+          <div className="flex gap-2 pt-2">
+            <Button variant="outline" onClick={() => setStep(1)} className="w-1/3">
+              Back
+            </Button>
+            <Button
               disabled={cart.size === 0}
               onClick={prepareReturnablesStep}
-              className="w-2/3 py-4 rounded-2xl bg-indigo-600 disabled:opacity-40 text-white font-bold text-base flex items-center justify-center space-x-2 shadow-lg shadow-indigo-600/30"
+              className="w-2/3 gap-1.5"
             >
               <span>Next: Record Returns</span>
-              <ArrowRight className="w-5 h-5" />
-            </button>
+              <ArrowRight className="w-4 h-4" />
+            </Button>
           </div>
         </div>
       )}
 
+      {/* STEP 3: Record Empties Returned */}
       {step === 3 && (
         <div className="space-y-4">
-          <div className="bg-indigo-950/60 border border-indigo-800/60 p-4 rounded-2xl text-xs space-y-1.5">
-            <div className="flex justify-between font-bold text-indigo-200">
-              <span>Required 1:1 Bottle Return:</span>
-              <span className="font-mono text-indigo-300 text-sm">{totalDeliveredBottles} bottles</span>
-            </div>
-            <div className="flex justify-between font-bold text-indigo-200">
-              <span>Required 1:1 Shell Case Return:</span>
-              <span className="font-mono text-cyan-300 text-sm">{totalDeliveredCases} cases</span>
-            </div>
-            <p className="text-[10px] text-slate-400 pt-1 border-t border-indigo-800/40">
-              💡 Customer pays <strong>₱0.00 PUNDO Deposit</strong> if all required empties are returned! Charges only apply if empties are lacking.
-            </p>
-          </div>
-
-          <h2 className="text-sm font-bold text-slate-300 uppercase tracking-wider">Record Actual Empties Returned by Store</h2>
-
-          <div className="space-y-3">
-            {Array.from(returnsMap.values()).map(({ item, returnedQty }) => (
-              <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-bold text-white text-base">{item.name}</h4>
-                    <p className="text-xs text-slate-400">
-                      Deposit Rate: <strong className="text-amber-400 font-mono">₱{Number(item.deposit_rate || item.pundo_value || 0).toFixed(2)}</strong> / {item.unit}
-                    </p>
-                  </div>
-                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 uppercase">
-                    {item.item_type || item.type}
-                  </span>
+          {/* Requirement Banner */}
+          <div className="bg-zinc-50 border border-zinc-200 p-4 rounded-lg text-xs space-y-1.5">
+            {totalRequiredBottles > 0 || totalRequiredCases > 0 ? (
+              <>
+                <div className="flex justify-between font-medium text-zinc-800">
+                  <span>Required Bottle Returns:</span>
+                  <span className="font-mono font-bold text-zinc-900">{totalRequiredBottles} bottles</span>
                 </div>
-
-                <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-                  <span className="text-xs text-slate-400">Returned Count:</span>
-
-                  <div className="flex items-center space-x-2 bg-slate-950 px-2 py-1.5 rounded-2xl border border-slate-800">
-                    <button
-                      onClick={() => updateReturnedQty(item.id, -1)}
-                      className="w-9 h-9 rounded-xl bg-slate-800 text-white flex items-center justify-center font-bold shrink-0 active:scale-95"
-                    >
-                      <Minus className="w-4 h-4" />
-                    </button>
-
-                    <input
-                      type="number"
-                      min="0"
-                      value={returnedQty === 0 ? '' : returnedQty}
-                      placeholder="0"
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setReturnedQtyDirect(item.id, isNaN(val) ? 0 : val);
-                      }}
-                      className="w-16 text-center font-extrabold text-lg text-white font-mono bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded-lg py-1 border border-slate-800"
-                    />
-
-                    <button
-                      onClick={() => updateReturnedQty(item.id, 1)}
-                      className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold shrink-0 active:scale-95"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                  </div>
+                <div className="flex justify-between font-medium text-zinc-800">
+                  <span>Required Shell Case Returns:</span>
+                  <span className="font-mono font-bold text-zinc-900">{totalRequiredCases} cases</span>
                 </div>
+                <p className="text-[11px] text-zinc-500 pt-1 border-t border-zinc-200">
+                  Customer pays <strong>₱0.00 PUNDO Deposit</strong> if all required empties are returned.
+                </p>
+              </>
+            ) : (
+              <div className="text-zinc-600">
+                <span className="font-semibold text-zinc-900">No Returnables Required.</span>
+                <p className="text-[11px] text-zinc-500 mt-0.5">
+                  Delivered products do not require empty container returns. You can still record surplus empties below.
+                </p>
               </div>
-            ))}
+            )}
           </div>
 
-          <div className="flex space-x-3 pt-2">
-            <button onClick={() => setStep(2)} className="w-1/3 py-4 rounded-2xl bg-slate-800 text-slate-300 font-bold text-sm">Back</button>
-            <button
+          {/* Section: Expected Container Returns strictly for delivered items */}
+          <div className="space-y-2.5">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">
+              Expected Container Returns
+            </h2>
+
+            {Array.from(returnsMap.values())
+              .filter(({ item }) => requiredByReturnableId.has(item.id))
+              .map(({ item, returnedQty }) => {
+                const reqObj = requiredByReturnableId.get(item.id);
+                const reqQty = reqObj?.requiredQty || 0;
+                const depositRate = Number(item.deposit_rate || item.pundo_value || 0);
+                const isSatisfied = returnedQty >= reqQty;
+
+                return (
+                  <Card key={item.id} className={isSatisfied ? 'border-emerald-200 bg-emerald-50/20' : ''}>
+                    <CardContent className="p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <h4 className="font-bold text-zinc-900 text-base">{item.name}</h4>
+                          {reqObj?.sourceProducts && reqObj.sourceProducts.length > 0 && (
+                            <p className="text-[11px] text-zinc-500">
+                              For: {reqObj.sourceProducts.join(', ')}
+                            </p>
+                          )}
+                          <p className="text-xs text-zinc-500 mt-0.5">
+                            Deposit Rate: <strong className="text-zinc-900 font-mono">₱{depositRate.toFixed(2)}</strong> / {item.unit || (item.item_type === 'BOTTLE' ? 'bottle' : 'case')}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge variant="outline" className="font-mono text-xs uppercase">
+                            {item.item_type || item.type}
+                          </Badge>
+                          <Badge variant={isSatisfied ? 'default' : 'secondary'} className="text-[10px] font-mono">
+                            Req: {reqQty}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-zinc-100">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setReturnedQtyDirect(item.id, reqQty)}
+                          className="h-7 text-xs text-zinc-600 hover:text-zinc-900 px-2"
+                        >
+                          <Check className="w-3.5 h-3.5 mr-1" />
+                          <span>Return Full ({reqQty})</span>
+                        </Button>
+
+                        <div className="flex items-center gap-1.5 bg-zinc-50 p-1 rounded-lg border border-zinc-200">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => updateReturnedQty(item.id, -1)}
+                            className="h-8 w-8"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </Button>
+
+                          <Input
+                            type="number"
+                            min="0"
+                            value={returnedQty === 0 ? '' : returnedQty}
+                            placeholder="0"
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              setReturnedQtyDirect(item.id, isNaN(val) ? 0 : val);
+                            }}
+                            className="w-16 text-center font-bold text-base font-mono h-8 p-0"
+                          />
+
+                          <Button
+                            variant="default"
+                            size="icon"
+                            onClick={() => updateReturnedQty(item.id, 1)}
+                            className="h-8 w-8"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+          </div>
+
+          {/* Section: Additional / Surplus Empty Returns */}
+          <div className="space-y-2.5 pt-2">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">
+                Additional / Surplus Empties
+              </h2>
+            </div>
+
+            {Array.from(returnsMap.values())
+              .filter(({ item }) => !requiredByReturnableId.has(item.id))
+              .map(({ item, returnedQty }) => (
+                <Card key={item.id} className="border-dashed border-zinc-300">
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-zinc-900 text-base">{item.name}</h4>
+                          <Badge variant="outline" className="text-[10px] text-emerald-700 border-emerald-200 bg-emerald-50 font-mono">
+                            Extra Credit
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-zinc-500">
+                          Refund Rate: <strong className="text-zinc-900 font-mono">₱{Number(item.deposit_rate || item.pundo_value || 0).toFixed(2)}</strong> / {item.unit || 'pc'}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleRemoveExtraReturnable(item.id)}
+                        className="h-7 w-7 text-zinc-400 hover:text-red-600"
+                        title="Remove container"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-zinc-100">
+                      <span className="text-xs text-zinc-600">Returned Count:</span>
+                      <div className="flex items-center gap-1.5 bg-zinc-50 p-1 rounded-lg border border-zinc-200">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => updateReturnedQty(item.id, -1)}
+                          className="h-8 w-8"
+                        >
+                          <Minus className="w-3.5 h-3.5" />
+                        </Button>
+
+                        <Input
+                          type="number"
+                          min="0"
+                          value={returnedQty === 0 ? '' : returnedQty}
+                          placeholder="0"
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setReturnedQtyDirect(item.id, isNaN(val) ? 0 : val);
+                          }}
+                          className="w-16 text-center font-bold text-base font-mono h-8 p-0"
+                        />
+
+                        <Button
+                          variant="default"
+                          size="icon"
+                          onClick={() => updateReturnedQty(item.id, 1)}
+                          className="h-8 w-8"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+
+            {availableExtraContainers.length > 0 && (
+              <div className="flex items-center gap-2 pt-1">
+                <Select
+                  value={selectedExtraReturnableId}
+                  onValueChange={(val) => {
+                    if (val) handleAddExtraReturnable(val);
+                  }}
+                >
+                  <SelectTrigger className="text-xs">
+                    <SelectValue placeholder="+ Add other empty container to return..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableExtraContainers.map((r) => (
+                      <SelectItem key={r.id} value={r.id} className="text-xs">
+                        {r.name} ({r.item_type || r.type} - ₱{Number(r.deposit_rate || r.pundo_value || 0).toFixed(2)})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-2 pt-4">
+            <Button variant="outline" onClick={() => setStep(2)} className="w-1/3">
+              Back
+            </Button>
+            <Button
               onClick={() => setStep(4)}
-              className="w-2/3 py-4 rounded-2xl bg-indigo-600 text-white font-bold text-base flex items-center justify-center space-x-2 shadow-lg shadow-indigo-600/30"
+              className="w-2/3 gap-1.5"
             >
-              <span>Next: Review & Confirm</span>
-              <ArrowRight className="w-5 h-5" />
-            </button>
+              <span>Review & Confirm</span>
+              <ArrowRight className="w-4 h-4" />
+            </Button>
           </div>
         </div>
       )}
 
+      {/* STEP 4: Review & Confirm */}
       {step === 4 && (
-        <div className="space-y-6">
-          <h2 className="text-sm font-bold text-slate-300 uppercase tracking-wider">Final Delivery & PUNDO Review</h2>
+        <div className="space-y-4">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Final Delivery & PUNDO Review</h2>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-xl">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <div>
-                <p className="text-xs text-slate-400 font-bold">Store Account</p>
-                <h3 className="text-lg font-black text-white">{selectedStore?.store_name}</h3>
-              </div>
-              <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20">
-                DELIVERY STATEMENT
-              </span>
-            </div>
-
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between text-slate-300">
-                <span>Products Delivered:</span>
-                <span className="font-bold text-white">{totalDeliveredCases} cases ({totalDeliveredBottles} btls)</span>
-              </div>
-              <div className="flex justify-between text-slate-300">
-                <span>Beverage Liquid Subtotal:</span>
-                <span className="font-mono text-emerald-400 font-bold">₱{cartTotal.toFixed(2)}</span>
-              </div>
-            </div>
-
-            {/* Container Exchange Status Banner */}
-            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
-              <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs uppercase">
-                <Coins className="w-4 h-4" />
-                <span>Container Exchange & PUNDO Summary</span>
-              </div>
-
-              {lackingBottles === 0 && lackingCases === 0 ? (
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs flex items-center space-x-2">
-                  <Check className="w-4 h-4 shrink-0" />
-                  <span><strong>Full 1:1 Empties Returned!</strong> No container PUNDO deposit charge applied.</span>
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardDescription className="text-xs">Store Account</CardDescription>
+                  <CardTitle className="text-base">{selectedStore?.store_name}</CardTitle>
                 </div>
-              ) : (
-                <div className="space-y-2 text-xs">
-                  {lackingBottles > 0 && (
-                    <div className="flex justify-between text-amber-300 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
-                      <span>Lacking {lackingBottles} bottles @ ₱{bottlePundoRate.toFixed(2)}:</span>
-                      <span className="font-mono font-bold">+₱{bottlePundoCharge.toFixed(2)}</span>
-                    </div>
-                  )}
-                  {lackingCases > 0 && (
-                    <div className="flex justify-between text-cyan-300 bg-cyan-500/10 p-2 rounded-lg border border-cyan-500/20">
-                      <span>Lacking {lackingCases} cases @ ₱{casePundoRate.toFixed(2)}:</span>
-                      <span className="font-mono font-bold">+₱{casePundoCharge.toFixed(2)}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {extraEmptiesCredit > 0 && (
-                <div className="flex justify-between text-emerald-400 bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20 text-xs">
-                  <span>Extra Empties Returned Credit:</span>
-                  <span className="font-mono font-bold">-₱{extraEmptiesCredit.toFixed(2)}</span>
-                </div>
-              )}
-
-              <div className="flex justify-between items-center pt-2 border-t border-slate-800 text-sm font-bold">
-                <span className="text-slate-200">Total Net Amount Due:</span>
-                <span className="font-mono text-amber-300 text-lg font-black">₱{netTotalPayable.toFixed(2)}</span>
+                <Badge variant="outline" className="font-mono text-xs">
+                  STATEMENT
+                </Badge>
               </div>
-            </div>
-          </div>
+            </CardHeader>
 
-          <div className="flex space-x-3">
-            <button onClick={() => setStep(3)} className="w-1/3 py-4 rounded-2xl bg-slate-800 text-slate-300 font-bold text-sm">Back</button>
-            <button
+            <CardContent className="space-y-4 pt-0">
+              <div className="space-y-1.5 text-xs text-zinc-600">
+                <div className="flex justify-between">
+                  <span>Products Delivered:</span>
+                  <span className="font-semibold text-zinc-900">{totalDeliveredCases} cases ({totalDeliveredBottles} bottles)</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Beverage Subtotal:</span>
+                  <span className="font-mono font-semibold text-zinc-900">₱{cartTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+
+              {/* Container Exchange Summary */}
+              <div className="bg-zinc-50 p-3.5 rounded-lg border border-zinc-200 space-y-2.5">
+                <div className="flex items-center gap-1.5 font-bold text-xs uppercase text-zinc-800">
+                  <Coins className="w-4 h-4 text-zinc-600" />
+                  <span>Container Exchange Summary</span>
+                </div>
+
+                {totalShortageBottles === 0 && totalShortageCases === 0 ? (
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded text-emerald-800 text-xs flex items-center gap-2">
+                    <Check className="w-4 h-4 shrink-0" />
+                    <span><strong>1:1 Empties Returned.</strong> No PUNDO deposit charge applied.</span>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 text-xs">
+                    {breakdownList
+                      .filter((r) => r.shortage > 0)
+                      .map((r) => (
+                        <div key={r.item.id} className="flex justify-between text-zinc-700 bg-white p-2 rounded border border-zinc-200">
+                          <span>Lacking {r.shortage}x {r.item.name} @ ₱{r.rate.toFixed(2)}:</span>
+                          <span className="font-mono font-semibold text-zinc-900">+₱{r.charge.toFixed(2)}</span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+
+                {totalEmptiesCredit > 0 && (
+                  <div className="flex justify-between text-emerald-700 bg-emerald-50 p-2 rounded border border-emerald-200 text-xs font-medium">
+                    <span>Extra Empties Credit:</span>
+                    <span className="font-mono">-₱{totalEmptiesCredit.toFixed(2)}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center pt-2 border-t border-zinc-200 text-sm font-bold">
+                  <span className="text-zinc-900">Total Payable:</span>
+                  <span className="font-mono text-base font-bold text-zinc-900">₱{netTotalPayable.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setStep(3)} className="w-1/3">
+              Back
+            </Button>
+            <Button
               disabled={submitting}
               onClick={handleConfirmDelivery}
-              className="w-2/3 py-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-base shadow-lg shadow-emerald-500/30 touch-target flex items-center justify-center space-x-2"
+              className="w-2/3 gap-1.5"
             >
-              <FileText className="w-5 h-5" />
-              <span>{submitting ? 'Saving...' : 'CONFIRM & SAVE DELIVERY'}</span>
-            </button>
+              <FileText className="w-4 h-4" />
+              <span>{submitting ? 'Saving...' : 'Confirm & Save Delivery'}</span>
+            </Button>
           </div>
         </div>
       )}
 
       {/* Printable Billing Statement Preview Modal */}
-      {isPreviewModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl text-slate-100 space-y-4 my-8">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center space-x-2 text-emerald-400">
-                <CheckCircle2 className="w-5 h-5" />
-                <h3 className="font-extrabold text-base text-white">Delivery Recorded Successfully!</h3>
-              </div>
-              <button
-                onClick={() => {
-                  setIsPreviewModalOpen(false);
-                  setStep(1);
-                  setCart(new Map());
-                  setSelectedStore(null);
-                  fetchDeliveryData();
-                }}
-                className="text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
+      <Dialog
+        open={isPreviewModalOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsPreviewModalOpen(false);
+            setStep(1);
+            setCart(new Map());
+            setSelectedStore(null);
+            fetchDeliveryData();
+          }
+        }}
+      >
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <div className="flex items-center gap-2 text-emerald-700">
+              <CheckCircle2 className="w-5 h-5" />
+              <DialogTitle>Delivery Recorded</DialogTitle>
+            </div>
+            <DialogDescription>
+              Transaction has been committed to the ledger.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Official Printable Billing Statement Document */}
+          <div className="bg-white text-zinc-900 p-4 rounded-lg space-y-3 font-sans text-xs border border-zinc-200">
+            {/* Distributor Header */}
+            <div className="text-center border-b border-zinc-200 pb-2">
+              <h2 className="text-sm font-bold uppercase tracking-tight text-zinc-900">{tenant?.name || 'BEVERAGE DISTRIBUTION SYSTEM'}</h2>
+              <p className="text-[10px] text-zinc-500">Delivery & Container Deposit Billing Statement</p>
+              <span className="inline-block mt-0.5 text-[8px] font-semibold uppercase tracking-wider px-1.5 py-0.5 bg-zinc-100 rounded text-zinc-600">
+                STATEMENT OF ACCOUNT
+              </span>
             </div>
 
-            {/* Official Printable Billing Statement Document */}
-            <div className="bg-white text-black p-5 rounded-2xl space-y-4 font-sans text-xs border border-slate-300 shadow-inner">
-              {/* Distributor Header */}
-              <div className="text-center border-b border-slate-300 pb-3">
-                <h2 className="text-base font-black uppercase tracking-tight text-slate-900">{tenant?.name || 'BEVERAGE DISTRIBUTION SYSTEM'}</h2>
-                <p className="text-[10px] text-slate-600 font-medium">Official Delivery & Container PUNDO Billing Statement</p>
-                <span className="inline-block mt-1 text-[8px] font-bold uppercase tracking-wider px-2 py-0.5 bg-slate-200 rounded text-slate-700">
-                  * STATEMENT OF ACCOUNT (NOT AN OFFICIAL RECEIPT) *
-                </span>
-              </div>
-
-              {/* Statement Details */}
-              <div className="grid grid-cols-2 gap-2 text-[10px] bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                <div>
-                  <span className="text-slate-500 block uppercase font-bold text-[8px]">CUSTOMER STORE</span>
-                  <span className="font-extrabold text-black block text-xs">{selectedStore?.store_name}</span>
-                  <span className="text-slate-600 font-mono">Code: {selectedStore?.store_code}</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-slate-500 block uppercase font-bold text-[8px]">STATEMENT REF</span>
-                  <span className="font-mono font-bold text-indigo-950 text-xs block">{saleRecord?.sale_number || `STMT-${Date.now().toString().slice(-6)}`}</span>
-                  <span className="text-slate-600">{new Date().toLocaleDateString()}</span>
-                </div>
-              </div>
-
-              {/* Delivered Products Table */}
+            {/* Statement Details */}
+            <div className="grid grid-cols-2 gap-2 text-[10px] bg-zinc-50 p-2 rounded border border-zinc-200">
               <div>
-                <h4 className="font-black text-[9px] uppercase tracking-wider text-slate-700 mb-1">1. Delivered Beverage Products</h4>
+                <span className="text-zinc-500 block uppercase font-bold text-[8px]">STORE</span>
+                <span className="font-semibold text-zinc-900 block text-xs">{selectedStore?.store_name}</span>
+                <span className="text-zinc-500 font-mono">Code: {selectedStore?.store_code}</span>
+              </div>
+              <div className="text-right">
+                <span className="text-zinc-500 block uppercase font-bold text-[8px]">STATEMENT #</span>
+                <span className="font-mono font-bold text-zinc-900 text-xs block">{saleRecord?.sale_number || `STMT-${Date.now().toString().slice(-6)}`}</span>
+                <span className="text-zinc-500">{new Date().toLocaleDateString()}</span>
+              </div>
+            </div>
+
+            {/* Delivered Products Table */}
+            <div>
+              <h4 className="font-bold text-[9px] uppercase tracking-wider text-zinc-700 mb-1">1. Delivered Products</h4>
+              <table className="w-full text-left text-[10px] border-collapse">
+                <thead>
+                  <tr className="border-b border-zinc-200 text-zinc-500 font-semibold uppercase text-[8px]">
+                    <th className="py-1">Product</th>
+                    <th className="py-1 text-center">Cases</th>
+                    <th className="py-1 text-right">Price</th>
+                    <th className="py-1 text-right">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100">
+                  {Array.from(cart.values()).map((c, i) => (
+                    <tr key={i}>
+                      <td className="py-1 font-medium">{c.product.name}</td>
+                      <td className="py-1 text-center font-mono">{c.qtyCases} cs</td>
+                      <td className="py-1 text-right font-mono">₱{c.casePrice.toFixed(2)}</td>
+                      <td className="py-1 text-right font-mono font-semibold">₱{(c.qtyCases * c.casePrice).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Empties Returned Table */}
+            {returnedItemsList.length > 0 && (
+              <div>
+                <h4 className="font-bold text-[9px] uppercase tracking-wider text-zinc-700 mb-1">2. Returned Empties</h4>
                 <table className="w-full text-left text-[10px] border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-300 text-slate-600 font-bold uppercase text-[8px]">
-                      <th className="py-1">Product Item</th>
-                      <th className="py-1 text-center">Cases</th>
-                      <th className="py-1 text-right">Price</th>
-                      <th className="py-1 text-right">Subtotal</th>
+                    <tr className="border-b border-zinc-200 text-zinc-500 font-semibold uppercase text-[8px]">
+                      <th className="py-1">Container</th>
+                      <th className="py-1 text-center">Qty</th>
+                      <th className="py-1 text-right">Rate</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {Array.from(cart.values()).map((c, i) => (
+                  <tbody className="divide-y divide-zinc-100">
+                    {returnedItemsList.map((r, i) => (
                       <tr key={i}>
-                        <td className="py-1 font-semibold">{c.product.name} ({c.unitsPerCase} btls/cs)</td>
-                        <td className="py-1 text-center font-mono font-bold">{c.qtyCases} cs</td>
-                        <td className="py-1 text-right font-mono">₱{c.casePrice.toFixed(2)}</td>
-                        <td className="py-1 text-right font-mono font-bold">₱{(c.qtyCases * c.casePrice).toFixed(2)}</td>
+                        <td className="py-1 font-medium">{r.item.name}</td>
+                        <td className="py-1 text-center font-mono">{r.returnedQty} {r.item.unit || 'pcs'}</td>
+                        <td className="py-1 text-right font-mono">₱{r.rate.toFixed(2)} / {r.item.unit || 'pc'}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+            )}
 
-              {/* Empties Returned Table */}
-              {returnedItemsList.length > 0 && (
-                <div>
-                  <h4 className="font-black text-[9px] uppercase tracking-wider text-cyan-800 mb-1">2. Empties Returned Summary</h4>
-                  <table className="w-full text-left text-[10px] border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-300 text-slate-600 font-bold uppercase text-[8px]">
-                        <th className="py-1">Container Returned</th>
-                        <th className="py-1 text-center">Qty</th>
-                        <th className="py-1 text-right">Rate</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {returnedItemsList.map((r, i) => (
-                        <tr key={i}>
-                          <td className="py-1 font-semibold">{r.item.name}</td>
-                          <td className="py-1 text-center font-mono font-bold">{r.returnedQty} {r.item.unit}</td>
-                          <td className="py-1 text-right font-mono font-bold text-slate-700">₱{r.rate.toFixed(2)} / {r.item.unit}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {/* Net Amount Summary */}
+            <div className="border-t border-zinc-900 pt-2 space-y-1 text-[11px] font-medium">
+              <div className="flex justify-between text-zinc-600">
+                <span>Product Subtotal:</span>
+                <span className="font-mono font-semibold text-zinc-900">₱{cartTotal.toFixed(2)}</span>
+              </div>
+              {netPundoDepositDue > 0 && (
+                <div className="flex justify-between text-zinc-600">
+                  <span>Lacking Container Deposit:</span>
+                  <span className="font-mono font-semibold text-zinc-900">+₱{netPundoDepositDue.toFixed(2)}</span>
                 </div>
               )}
-
-              {/* Container Exchange & PUNDO Deposit Penalty */}
-              <div>
-                <h4 className="font-black text-[9px] uppercase tracking-wider text-amber-800 mb-1">3. Container Exchange & Lacking PUNDO Charges</h4>
-                <div className="space-y-1 text-[10px] bg-slate-100 p-2.5 rounded-xl border border-slate-300">
-                  {lackingBottles === 0 && lackingCases === 0 ? (
-                    <div className="text-emerald-700 font-bold">
-                      ✓ Full 1:1 Empties Returned! ₱0.00 Container Deposit Penalty.
-                    </div>
-                  ) : (
-                    <>
-                      {lackingBottles > 0 && (
-                        <div className="flex justify-between text-amber-900 font-medium">
-                          <span>Lacking {lackingBottles} bottles @ ₱{bottlePundoRate.toFixed(2)}:</span>
-                          <span className="font-mono font-bold">+₱{bottlePundoCharge.toFixed(2)}</span>
-                        </div>
-                      )}
-                      {lackingCases > 0 && (
-                        <div className="flex justify-between text-amber-900 font-medium">
-                          <span>Lacking {lackingCases} plastic cases @ ₱{casePundoRate.toFixed(2)}:</span>
-                          <span className="font-mono font-bold">+₱{casePundoCharge.toFixed(2)}</span>
-                        </div>
-                      )}
-                    </>
-                  )}
-                  {extraEmptiesCredit > 0 && (
-                    <div className="flex justify-between text-emerald-700 font-bold border-t border-slate-300 pt-1">
-                      <span>Extra Empties Credit:</span>
-                      <span className="font-mono">-₱{extraEmptiesCredit.toFixed(2)}</span>
-                    </div>
-                  )}
+              {totalEmptiesCredit > 0 && (
+                <div className="flex justify-between text-emerald-700">
+                  <span>Surplus Empties Credit:</span>
+                  <span className="font-mono">-₱{totalEmptiesCredit.toFixed(2)}</span>
                 </div>
+              )}
+              <div className="flex justify-between text-sm font-bold text-zinc-900 pt-1 border-t border-zinc-200">
+                <span>Net Total Paid:</span>
+                <span className="font-mono text-base">₱{netTotalPayable.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
-
-              {/* Net Amount Summary */}
-              <div className="border-t-2 border-slate-900 pt-2 space-y-1 text-[11px] font-bold">
-                <div className="flex justify-between text-slate-700">
-                  <span>Product Sales Subtotal:</span>
-                  <span className="font-mono">₱{cartTotal.toFixed(2)}</span>
-                </div>
-                {netPundoDepositDue > 0 && (
-                  <div className="flex justify-between text-amber-800">
-                    <span>Lacking Container Deposit Charge:</span>
-                    <span className="font-mono">+₱{netPundoDepositDue.toFixed(2)}</span>
-                  </div>
-                )}
-                {extraEmptiesCredit > 0 && (
-                  <div className="flex justify-between text-emerald-700">
-                    <span>Surplus Empties Credit:</span>
-                    <span className="font-mono">-₱{extraEmptiesCredit.toFixed(2)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-base font-black text-slate-950 pt-1 border-t border-slate-400">
-                  <span>NET TOTAL PAYABLE DUE:</span>
-                  <span className="font-mono text-indigo-950">₱{netTotalPayable.toFixed(2)}</span>
-                </div>
-              </div>
-
-              {/* Signature Blocks */}
-              <div className="pt-4 grid grid-cols-2 gap-4 text-[9px] text-center text-slate-600">
-                <div className="border-t border-slate-400 pt-1">
-                  <span>Received By (Store Representative)</span>
-                </div>
-                <div className="border-t border-slate-400 pt-1">
-                  <span>Delivered By (Route Agent)</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex space-x-3 pt-2">
-              <button
-                onClick={() => {
-                  setIsPreviewModalOpen(false);
-                  setStep(1);
-                  setCart(new Map());
-                  setSelectedStore(null);
-                  fetchDeliveryData();
-                }}
-                className="w-1/2 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl"
-              >
-                Close & Return
-              </button>
-
-              <button
-                onClick={() => window.print()}
-                className="w-1/2 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Print Billing Statement</span>
-              </button>
             </div>
           </div>
-        </div>
-      )}
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsPreviewModalOpen(false);
+                setStep(1);
+                setCart(new Map());
+                setSelectedStore(null);
+                fetchDeliveryData();
+              }}
+            >
+              Done & Return
+            </Button>
+            <Button onClick={() => window.print()} className="gap-1.5">
+              <Printer className="w-4 h-4" />
+              <span>Print Statement</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
