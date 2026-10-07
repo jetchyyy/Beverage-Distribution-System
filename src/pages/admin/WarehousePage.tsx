@@ -23,6 +23,7 @@ export const WarehousePage: React.FC = () => {
   const [batches, setBatches] = useState<ProductBatch[]>([]);
   const [trucks, setTrucks] = useState<Truck[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [containerLocFilter, setContainerLocFilter] = useState<string>('ALL');
 
   // Accordion Expand State for Overall Inventory View & Trucks View
   const [expandedProductIds, setExpandedProductIds] = useState<Set<string>>(new Set());
@@ -70,7 +71,7 @@ export const WarehousePage: React.FC = () => {
           .eq('tenant_id', tenant.id),
         supabase
           .from('returnable_balances')
-          .select('*, returnable_items(name, type, pundo_value, unit)')
+          .select('*, returnable_items(name, type, pundo_value, unit, deposit_rate, item_type), locations(name, type)')
           .eq('tenant_id', tenant.id),
         supabase
           .from('product_batches')
@@ -874,39 +875,83 @@ export const WarehousePage: React.FC = () => {
 
       {/* Tab 4: Empty Containers */}
       {activeTab === 'RETURNABLES' && (() => {
-        const consolidatedMap = new Map<string, any>();
+        // Group by unique container item: normalized name + item_type
+        const consolidatedMap = new Map<string, {
+          id: string;
+          name: string;
+          itemType: string;
+          unit: string;
+          pundoRate: number;
+          depotQty: number;
+          trucksQty: number;
+          totalQty: number;
+          trucksBreakdown: { locationName: string; qty: number }[];
+        }>();
 
         (returnableBalances || []).forEach((rb) => {
-          const locId = rb.location_id || 'WH_MAIN';
-          const itemId = rb.returnable_item_id || rb.id;
-          const key = `${locId}_${itemId}`;
+          const rawName = rb.returnable_items?.name || 'Returnable Container';
+          const cleanName = rawName.trim();
+          const itemType = (rb.returnable_items?.item_type || rb.returnable_items?.type || 'CONTAINER').toUpperCase();
+          const unit = rb.returnable_items?.unit || (itemType === 'CASE' ? 'case' : 'bottle');
+          const pundoRate = Number(rb.returnable_items?.pundo_value || rb.returnable_items?.deposit_rate || 0);
+          const qty = Number(rb.quantity || 0);
+
+          const isWarehouse = !rb.locations || rb.locations?.type === 'WAREHOUSE';
+          const locName = isWarehouse ? 'Main Warehouse Depot' : (rb.locations?.name || 'Truck');
+
+          // Location filtering check
+          if (containerLocFilter === 'WAREHOUSE' && !isWarehouse) return;
+          if (containerLocFilter !== 'ALL' && containerLocFilter !== 'WAREHOUSE' && rb.location_id !== containerLocFilter) return;
+
+          const key = `${cleanName.toLowerCase()}__${itemType}`;
 
           if (!consolidatedMap.has(key)) {
             consolidatedMap.set(key, {
-              ...rb,
-              quantity: Number(rb.quantity || 0),
+              id: rb.returnable_item_id || rb.id,
+              name: cleanName,
+              itemType,
+              unit,
+              pundoRate,
+              depotQty: isWarehouse ? qty : 0,
+              trucksQty: !isWarehouse ? qty : 0,
+              totalQty: qty,
+              trucksBreakdown: !isWarehouse && qty > 0 ? [{ locationName: locName, qty }] : [],
             });
           } else {
-            const existing = consolidatedMap.get(key);
-            existing.quantity += Number(rb.quantity || 0);
+            const existing = consolidatedMap.get(key)!;
+            if (isWarehouse) {
+              existing.depotQty += qty;
+            } else {
+              existing.trucksQty += qty;
+              if (qty > 0) {
+                existing.trucksBreakdown.push({ locationName: locName, qty });
+              }
+            }
+            existing.totalQty += qty;
+            if (existing.pundoRate === 0 && pundoRate > 0) {
+              existing.pundoRate = pundoRate;
+            }
           }
         });
 
-        const consolidatedList = Array.from(consolidatedMap.values());
+        const consolidatedList = Array.from(consolidatedMap.values()).sort((a, b) =>
+          a.name.localeCompare(b.name)
+        );
 
+        // Overall Depot KPI calculations (always based on warehouse stock)
         let totalWarehouseBottles = 0;
         let totalWarehouseShellCases = 0;
 
-        consolidatedList.forEach((rb) => {
-          const isWh = rb.locations?.type === 'WAREHOUSE' || !rb.locations;
+        (returnableBalances || []).forEach((rb) => {
+          const isWh = !rb.locations || rb.locations?.type === 'WAREHOUSE';
           if (isWh) {
-            const itemType = rb.returnable_items?.item_type || rb.returnable_items?.type || 'BOTTLE';
+            const itemType = (rb.returnable_items?.item_type || rb.returnable_items?.type || 'BOTTLE').toUpperCase();
             if (itemType === 'BOTTLE') totalWarehouseBottles += Number(rb.quantity || 0);
             if (itemType === 'CASE') totalWarehouseShellCases += Number(rb.quantity || 0);
           }
         });
 
-        const bottlesPerCase = 6;
+        const bottlesPerCase = 24;
         const fullEmptyCases = Math.min(Math.floor(totalWarehouseBottles / bottlesPerCase), totalWarehouseShellCases);
         const looseBottles = totalWarehouseBottles - (fullEmptyCases * bottlesPerCase);
         const looseShellCases = totalWarehouseShellCases - fullEmptyCases;
@@ -950,55 +995,95 @@ export const WarehousePage: React.FC = () => {
               </CardContent>
             </Card>
 
-            <Card className="overflow-hidden">
-              <div className="p-3.5 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between">
+            <Card className="overflow-hidden border-zinc-200 shadow-xs">
+              <div className="p-3.5 bg-zinc-50 border-b border-zinc-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center space-x-2">
                   <RotateCcw className="w-4 h-4 text-zinc-700" />
                   <h3 className="font-semibold text-zinc-900 text-sm">Container Balances</h3>
+                  <Badge variant="secondary" className="text-[10px] font-mono">
+                    {consolidatedList.length} items
+                  </Badge>
                 </div>
-                <span className="text-xs text-zinc-500">{consolidatedList.length} balances</span>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-zinc-500 font-medium">Filter Location:</span>
+                  <select
+                    value={containerLocFilter}
+                    onChange={(e) => setContainerLocFilter(e.target.value)}
+                    className="bg-white border border-zinc-300 rounded-md px-2.5 py-1 text-xs text-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-950 cursor-pointer"
+                  >
+                    <option value="ALL">All Locations (Consolidated)</option>
+                    <option value="WAREHOUSE">Main Warehouse Depot Only</option>
+                    {trucks.map((t) => (
+                      <option key={t.id} value={t.location_id || t.id}>
+                        {t.truck_code} ({t.plate_number})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs sm:text-sm text-zinc-700">
                   <thead className="bg-zinc-50 text-zinc-500 uppercase text-[11px] font-medium tracking-wider border-b border-zinc-200">
                     <tr>
-                      <th className="px-4 py-3">Container</th>
-                      <th className="px-4 py-3">Location</th>
+                      <th className="px-4 py-3">Container Item</th>
                       <th className="px-4 py-3">Type</th>
                       <th className="px-4 py-3">Depot Stock</th>
+                      <th className="px-4 py-3">Trucks Fleet</th>
+                      <th className="px-4 py-3">Total Balances</th>
                       <th className="px-4 py-3">PUNDO Rate</th>
+                      <th className="px-4 py-3 text-right">Total Valuation</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100 bg-white">
                     {consolidatedList.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-8 text-center text-zinc-400 text-xs">
-                          No returnable containers currently stored.
+                        <td colSpan={7} className="px-6 py-8 text-center text-zinc-400 text-xs">
+                          No returnable containers found for the selected location filter.
                         </td>
                       </tr>
                     ) : (
-                      consolidatedList.map((rb) => {
-                        const itemType = rb.returnable_items?.item_type || rb.returnable_items?.type || 'CONTAINER';
+                      consolidatedList.map((item) => {
+                        const totalValuation = item.totalQty * item.pundoRate;
 
                         return (
-                          <tr key={rb.id} className="hover:bg-zinc-50 transition-colors">
-                            <td className="px-4 py-3 font-medium text-zinc-900">
-                              {rb.returnable_items?.name || 'Returnable Container'}
-                            </td>
-                            <td className="px-4 py-3 text-zinc-600">
-                              {rb.locations?.name || 'Main Warehouse Depot'}
+                          <tr key={item.id} className="hover:bg-zinc-50 transition-colors">
+                            <td className="px-4 py-3 font-semibold text-zinc-900">
+                              {item.name}
                             </td>
                             <td className="px-4 py-3">
                               <Badge variant="outline" className="text-[10px]">
-                                {itemType}
+                                {item.itemType}
                               </Badge>
                             </td>
-                            <td className="px-4 py-3 font-semibold text-zinc-900 font-mono">
-                              {Number(rb.quantity).toLocaleString()} {rb.returnable_items?.unit || 'pcs'}
+                            <td className="px-4 py-3 font-mono text-zinc-800">
+                              {item.depotQty.toLocaleString()} <span className="text-xs text-zinc-500 font-normal">{item.unit}</span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-mono text-zinc-700">
+                                  {item.trucksQty.toLocaleString()} {item.unit}
+                                </span>
+                                {item.trucksBreakdown.length > 0 && (
+                                  <div className="flex gap-1 flex-wrap">
+                                    {item.trucksBreakdown.map((tb, idx) => (
+                                      <Badge key={idx} variant="secondary" className="text-[9px] font-mono bg-zinc-100 text-zinc-600">
+                                        {tb.locationName}: {tb.qty}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 font-bold text-zinc-900 font-mono">
+                              {item.totalQty.toLocaleString()} <span className="text-xs text-zinc-500 font-normal">{item.unit}</span>
                             </td>
                             <td className="px-4 py-3 text-xs font-mono font-medium text-zinc-900">
-                              ₱{Number(rb.returnable_items?.pundo_value || rb.returnable_items?.deposit_rate || 0).toFixed(2)}
+                              ₱{item.pundoRate.toFixed(2)}
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono font-bold text-zinc-900">
+                              ₱{totalValuation.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
                           </tr>
                         );

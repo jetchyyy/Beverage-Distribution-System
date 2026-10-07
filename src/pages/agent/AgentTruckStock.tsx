@@ -48,24 +48,48 @@ export const AgentTruckStock: React.FC = () => {
     try {
       let targetTruck: any = null;
 
+      let matchedAgent: any = null;
       if (profile?.id) {
         const { data: agData } = await supabase
           .from('agents')
-          .select('*, trucks(*)')
+          .select('*')
           .eq('tenant_id', tenant.id)
           .eq('user_id', profile.id)
           .limit(1)
           .maybeSingle();
 
-        if (agData?.trucks) {
-          targetTruck = agData.trucks;
-        } else if (agData?.assigned_truck_id) {
-          const { data: trk } = await supabase
-            .from('trucks')
-            .select('*')
-            .eq('id', agData.assigned_truck_id)
-            .maybeSingle();
-          targetTruck = trk;
+        if (agData) {
+          matchedAgent = agData;
+          if (agData.assigned_truck_id) {
+            const { data: trk } = await supabase
+              .from('trucks')
+              .select('*')
+              .eq('id', agData.assigned_truck_id)
+              .maybeSingle();
+            targetTruck = trk;
+          }
+        }
+      }
+
+      if (!matchedAgent && profile?.full_name) {
+        const { data: agByName } = await supabase
+          .from('agents')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .ilike('full_name', profile.full_name)
+          .limit(1)
+          .maybeSingle();
+
+        if (agByName) {
+          matchedAgent = agByName;
+          if (agByName.assigned_truck_id) {
+            const { data: trk } = await supabase
+              .from('trucks')
+              .select('*')
+              .eq('id', agByName.assigned_truck_id)
+              .maybeSingle();
+            targetTruck = trk;
+          }
         }
       }
 

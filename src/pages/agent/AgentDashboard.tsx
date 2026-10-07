@@ -24,26 +24,54 @@ export const AgentDashboard: React.FC = () => {
   const fetchAgentDashboard = async () => {
     if (!tenant) return;
     try {
+      let currentAgent: any = null;
       let targetTruck: any = null;
 
       if (profile?.id) {
         const { data: agData } = await supabase
           .from('agents')
-          .select('*, trucks(*)')
+          .select('*')
           .eq('tenant_id', tenant.id)
           .eq('user_id', profile.id)
           .limit(1)
           .maybeSingle();
 
-        if (agData?.trucks) {
-          targetTruck = agData.trucks;
-        } else if (agData?.assigned_truck_id) {
-          const { data: trk } = await supabase
-            .from('trucks')
-            .select('*')
-            .eq('id', agData.assigned_truck_id)
-            .maybeSingle();
-          targetTruck = trk;
+        if (agData) {
+          currentAgent = agData;
+          if (agData.assigned_truck_id) {
+            const { data: trk } = await supabase
+              .from('trucks')
+              .select('*')
+              .eq('id', agData.assigned_truck_id)
+              .maybeSingle();
+            targetTruck = trk;
+          }
+        }
+      }
+
+      // Fallback matching by profile full_name if user_id was not linked yet
+      if (!currentAgent && profile?.full_name) {
+        const { data: agByName } = await supabase
+          .from('agents')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .ilike('full_name', profile.full_name)
+          .limit(1)
+          .maybeSingle();
+
+        if (agByName) {
+          currentAgent = agByName;
+          if (agByName.assigned_truck_id) {
+            const { data: trk } = await supabase
+              .from('trucks')
+              .select('*')
+              .eq('id', agByName.assigned_truck_id)
+              .maybeSingle();
+            targetTruck = trk;
+          }
+          if (profile?.id && !agByName.user_id) {
+            await supabase.from('agents').update({ user_id: profile.id }).eq('id', agByName.id);
+          }
         }
       }
 
@@ -66,6 +94,21 @@ export const AgentDashboard: React.FC = () => {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
+        // Filter sales specifically to this agent / assigned truck
+        let salesQuery = supabase
+          .from('sales')
+          .select('total')
+          .eq('tenant_id', tenant.id)
+          .gte('created_at', todayStart.toISOString());
+
+        if (currentAgent?.id && targetTruck?.id) {
+          salesQuery = salesQuery.or(`agent_id.eq.${currentAgent.id},truck_id.eq.${targetTruck.id}`);
+        } else if (currentAgent?.id) {
+          salesQuery = salesQuery.eq('agent_id', currentAgent.id);
+        } else if (targetTruck?.id) {
+          salesQuery = salesQuery.eq('truck_id', targetTruck.id);
+        }
+
         const [balsRes, rBalsRes, salesTodayRes] = await Promise.all([
           supabase
             .from('inventory_balances')
@@ -75,11 +118,7 @@ export const AgentDashboard: React.FC = () => {
             .from('returnable_balances')
             .select('*, returnable_items(name, item_type, type)')
             .eq('location_id', locId),
-          supabase
-            .from('sales')
-            .select('total')
-            .eq('tenant_id', tenant.id)
-            .gte('created_at', todayStart.toISOString()),
+          salesQuery,
         ]);
 
         const bals = balsRes.data || [];
@@ -132,7 +171,7 @@ export const AgentDashboard: React.FC = () => {
             <div className="space-y-1">
               <Badge
                 variant="outline"
-                className="text-black border-zinc-700 font-mono text-xs"
+                className="bg-zinc-900 text-zinc-100 border-zinc-700 font-mono text-xs"
               >
                 Assigned Truck: {truckCode}
               </Badge>

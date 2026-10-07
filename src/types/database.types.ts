@@ -114,7 +114,7 @@ export interface ReturnableItem {
 export interface Supplier {
   id: string;
   tenant_id: string;
-  supplier_code: string;
+  supplier_code?: string | null;
   name: string;
   contact_person?: string | null;
   phone?: string | null;
@@ -175,6 +175,8 @@ export interface MicroStore {
   phone?: string | null;
   address?: string | null;
   location_id?: string | null;
+  assigned_agent_id?: string | null;
+  created_by_agent_id?: string | null;
   status: 'ACTIVE' | 'INACTIVE';
   created_at: string;
 }

@@ -66,6 +66,19 @@ export const AgentSalesHistory: React.FC = () => {
         activeTruckId = agentData?.assigned_truck_id;
       }
 
+      if (!activeAgentId && profile?.full_name) {
+        const { data: agentByName } = await supabase
+          .from('agents')
+          .select('id, assigned_truck_id')
+          .eq('tenant_id', tenant.id)
+          .ilike('full_name', profile.full_name)
+          .limit(1)
+          .maybeSingle();
+
+        activeAgentId = agentByName?.id;
+        activeTruckId = agentByName?.assigned_truck_id;
+      }
+
       if (!activeAgentId && !activeTruckId) {
         const { data: trkData } = await supabase
           .from('trucks')

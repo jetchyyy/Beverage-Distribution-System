@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useTenant } from '../../context/TenantContext';
 import { useAuth } from '../../context/AuthContext';
-import type { MicroStore, ReturnableItem, Truck } from '../../types/database.types';
+import type { MicroStore, ReturnableItem, Truck, Agent } from '../../types/database.types';
 import {
   ShoppingBag,
   ArrowRight,
@@ -15,6 +15,12 @@ import {
   AlertCircle,
   Check,
   Trash2,
+  Store,
+  MapPin,
+  Phone,
+  Search,
+  Sparkles,
+  ShieldAlert,
 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -183,8 +189,19 @@ export const AgentDeliveryFlow: React.FC = () => {
   const [stores, setStores] = useState<MicroStore[]>([]);
   const [selectedStore, setSelectedStore] = useState<MicroStore | null>(null);
   const [truck, setTruck] = useState<Truck | null>(null);
+  const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
   const [truckBalances, setTruckBalances] = useState<any[]>([]);
   const [returnableCatalog, setReturnableCatalog] = useState<ReturnableItem[]>([]);
+
+  // Store Search & On-Route Field Store Creation
+  const [storeSearch, setStoreSearch] = useState('');
+  const [isAddStoreModalOpen, setIsAddStoreModalOpen] = useState(false);
+  const [newStoreName, setNewStoreName] = useState('');
+  const [newOwnerName, setNewOwnerName] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newAddress, setNewAddress] = useState('');
+  const [creatingStore, setCreatingStore] = useState(false);
+  const [storeCreationError, setStoreCreationError] = useState<string | null>(null);
 
   // Cart State: Map<productId, { product, qtyCases, casePrice, unitsPerCase }>
   const [cart, setCart] = useState<Map<string, { product: any; qtyCases: number; casePrice: number; unitsPerCase: number }>>(new Map());
@@ -214,31 +231,66 @@ export const AgentDeliveryFlow: React.FC = () => {
       ]);
 
       const initialCatalog = retsRes.data || [];
-      setStores(stRes.data || []);
+      const allStores: MicroStore[] = stRes.data || [];
       setReturnableCatalog(initialCatalog);
       setPromotionsCatalog(promosRes.data || []);
 
       let targetTruck: Truck | null = null;
 
+      let matchedAgent: any = null;
       if (profile?.id) {
         const { data: agData } = await supabase
           .from('agents')
-          .select('*, trucks(*)')
+          .select('*')
           .eq('tenant_id', tenant.id)
           .eq('user_id', profile.id)
           .limit(1)
           .maybeSingle();
 
-        if (agData?.trucks) {
-          targetTruck = agData.trucks;
-        } else if (agData?.assigned_truck_id) {
-          const { data: trk } = await supabase
-            .from('trucks')
-            .select('*')
-            .eq('id', agData.assigned_truck_id)
-            .maybeSingle();
-          targetTruck = trk;
+        if (agData) {
+          matchedAgent = agData;
+          if (agData.assigned_truck_id) {
+            const { data: trk } = await supabase
+              .from('trucks')
+              .select('*')
+              .eq('id', agData.assigned_truck_id)
+              .maybeSingle();
+            targetTruck = trk;
+          }
         }
+      }
+
+      if (!matchedAgent && profile?.full_name) {
+        const { data: agByName } = await supabase
+          .from('agents')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .ilike('full_name', profile.full_name)
+          .limit(1)
+          .maybeSingle();
+
+        if (agByName) {
+          matchedAgent = agByName;
+          if (agByName.assigned_truck_id) {
+            const { data: trk } = await supabase
+              .from('trucks')
+              .select('*')
+              .eq('id', agByName.assigned_truck_id)
+              .maybeSingle();
+            targetTruck = trk;
+          }
+        }
+      }
+
+      // Filter visible stores for this agent (assigned stores + stores created by this agent)
+      if (matchedAgent) {
+        setCurrentAgent(matchedAgent);
+        const filtered = allStores.filter(
+          (s) => s.assigned_agent_id === matchedAgent.id || s.created_by_agent_id === matchedAgent.id
+        );
+        setStores(filtered);
+      } else {
+        setStores(allStores);
       }
 
       if (!targetTruck) {
@@ -972,8 +1024,86 @@ export const AgentDeliveryFlow: React.FC = () => {
     }
   };
 
+  const handleAgentCreateStore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenant || !newStoreName.trim()) return;
+    setCreatingStore(true);
+    setStoreCreationError(null);
+
+    try {
+      const genCode = `STR-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`;
+
+      // 1. Create location
+      const { data: loc } = await supabase
+        .from('locations')
+        .insert([
+          {
+            tenant_id: tenant.id,
+            name: newStoreName.trim(),
+            type: 'MICRO_STORE',
+            is_active: true,
+          },
+        ])
+        .select()
+        .maybeSingle();
+
+      // 2. Insert micro_store with assigned and created_by agent links
+      const storePayload: any = {
+        tenant_id: tenant.id,
+        store_code: genCode,
+        store_name: newStoreName.trim(),
+        owner_name: newOwnerName.trim() || null,
+        phone: newPhone.trim() || null,
+        address: newAddress.trim() || null,
+        location_id: loc?.id || null,
+        assigned_agent_id: currentAgent?.id || null,
+        created_by_agent_id: currentAgent?.id || null,
+        status: 'ACTIVE',
+      };
+
+      let insertRes = await supabase.from('micro_stores').insert([storePayload]).select().single();
+      if (insertRes.error && (insertRes.error.message?.includes('assigned_agent_id') || insertRes.error.message?.includes('created_by_agent_id'))) {
+        const { assigned_agent_id, created_by_agent_id, ...fallbackPayload } = storePayload;
+        insertRes = await supabase.from('micro_stores').insert([fallbackPayload]).select().single();
+      }
+
+      if (insertRes.error || !insertRes.data) {
+        throw (insertRes.error || new Error('Failed to register store in database'));
+      }
+
+      const createdStore: MicroStore = insertRes.data;
+
+      // Add to local state
+      setStores((prev) => [createdStore, ...prev]);
+
+      // Automatically select and advance to Step 2
+      setSelectedStore(createdStore);
+      setIsAddStoreModalOpen(false);
+      setNewStoreName('');
+      setNewOwnerName('');
+      setNewPhone('');
+      setNewAddress('');
+      setStep(2);
+    } catch (err: any) {
+      console.error('Error creating micro store:', err);
+      setStoreCreationError(err.message || 'Failed to create micro store');
+    } finally {
+      setCreatingStore(false);
+    }
+  };
+
   // Available unused containers in catalog for extra surplus return
   const availableExtraContainers = returnableCatalog.filter((r) => !returnsMap.has(r.id));
+
+  const filteredStepStores = stores.filter((s) => {
+    const q = storeSearch.toLowerCase();
+    return (
+      s.store_name.toLowerCase().includes(q) ||
+      s.store_code.toLowerCase().includes(q) ||
+      s.owner_name?.toLowerCase().includes(q) ||
+      s.address?.toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="space-y-6 max-w-lg mx-auto pb-20">
@@ -1008,42 +1138,196 @@ export const AgentDeliveryFlow: React.FC = () => {
       {/* STEP 1: Select Micro-Store */}
       {step === 1 && (
         <div className="space-y-4">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Select Store Destination</h2>
-          {stores.length === 0 ? (
-            <div className="p-8 text-center text-zinc-400 text-xs border border-dashed border-zinc-200 rounded-lg">
-              No registered micro-stores found. Register stores in admin portal.
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Select Store Destination</h2>
+              <p className="text-[11px] text-zinc-400">Stores assigned to your route ({stores.length})</p>
+            </div>
+            <Button
+              onClick={() => {
+                setStoreCreationError(null);
+                setIsAddStoreModalOpen(true);
+              }}
+              size="sm"
+              className="gap-1 text-xs h-8 bg-zinc-900 text-white hover:bg-zinc-800 shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add New Store</span>
+            </Button>
+          </div>
+
+          {stores.length > 0 && (
+            <div className="relative">
+              <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
+              <Input
+                type="text"
+                placeholder="Search assigned stores..."
+                value={storeSearch}
+                onChange={(e) => setStoreSearch(e.target.value)}
+                className="pl-9 text-xs h-9"
+              />
+            </div>
+          )}
+
+          {filteredStepStores.length === 0 ? (
+            <div className="p-8 text-center bg-zinc-50 border border-dashed border-zinc-200 rounded-xl space-y-3">
+              <Store className="w-8 h-8 text-zinc-400 mx-auto" />
+              <div>
+                <p className="text-xs font-semibold text-zinc-800">
+                  {stores.length === 0 ? 'No Assigned Route Stores Found' : 'No Stores Match Search'}
+                </p>
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  {stores.length === 0
+                    ? 'You have not been assigned stores by admin yet, or you can register a new store right now.'
+                    : 'Try another search term or register a new customer store.'}
+                </p>
+              </div>
+              <Button
+                onClick={() => {
+                  setStoreCreationError(null);
+                  setIsAddStoreModalOpen(true);
+                }}
+                size="sm"
+                className="gap-1.5 text-xs bg-zinc-900 text-white hover:bg-zinc-800"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Register New Store</span>
+              </Button>
             </div>
           ) : (
             <div className="space-y-2">
-              {stores.map((s) => (
-                <Card
-                  key={s.id}
-                  onClick={() => {
-                    setSelectedStore(s);
-                    setStep(2);
-                  }}
-                  className={`cursor-pointer transition hover:border-zinc-400 ${
-                    selectedStore?.id === s.id ? 'border-zinc-900 ring-1 ring-zinc-900' : ''
-                  }`}
-                >
-                  <CardContent className="p-4 flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-base text-zinc-900">{s.store_name}</span>
-                        <Badge variant="outline" className="font-mono text-xs">
-                          {s.store_code}
-                        </Badge>
+              {filteredStepStores.map((s) => {
+                const isCreatedByMe = currentAgent && s.created_by_agent_id === currentAgent.id;
+
+                return (
+                  <Card
+                    key={s.id}
+                    onClick={() => {
+                      setSelectedStore(s);
+                      setStep(2);
+                    }}
+                    className={`cursor-pointer transition hover:border-zinc-400 border-zinc-200 shadow-xs ${
+                      selectedStore?.id === s.id ? 'border-zinc-900 ring-1 ring-zinc-900' : ''
+                    }`}
+                  >
+                    <CardContent className="p-3.5 flex items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-sm text-zinc-900">{s.store_name}</span>
+                          <Badge variant="outline" className="font-mono text-[10px] text-zinc-600">
+                            {s.store_code}
+                          </Badge>
+                          {isCreatedByMe && (
+                            <Badge variant="secondary" className="text-[9px] bg-zinc-100 text-zinc-700 gap-0.5">
+                              <Sparkles className="w-2.5 h-2.5 text-amber-600" />
+                              <span>Field Added</span>
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-zinc-500 space-y-0.5">
+                          {s.owner_name && <p>Owner: {s.owner_name}</p>}
+                          {s.phone && (
+                            <p className="flex items-center gap-1 font-mono">
+                              <Phone className="w-3 h-3 text-zinc-400 shrink-0" />
+                              <span>{s.phone}</span>
+                            </p>
+                          )}
+                          {s.address && (
+                            <p className="flex items-center gap-1 line-clamp-1">
+                              <MapPin className="w-3 h-3 text-zinc-400 shrink-0" />
+                              <span>{s.address}</span>
+                            </p>
+                          )}
+                        </div>
                       </div>
-                      <p className="text-xs text-zinc-500 mt-1">Owner: {s.owner_name || 'N/A'}</p>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-zinc-400" />
-                  </CardContent>
-                </Card>
-              ))}
+                      <ArrowRight className="w-4 h-4 text-zinc-400 shrink-0" />
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
         </div>
       )}
+
+      {/* Field Store Creation Modal */}
+      <Dialog open={isAddStoreModalOpen} onOpenChange={setIsAddStoreModalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Store className="w-4 h-4 text-zinc-700" />
+              <span>Register New Micro Store</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Add a new customer store on-route. It will be added to your route and synced to the admin dashboard.
+            </DialogDescription>
+          </DialogHeader>
+
+          {storeCreationError && (
+            <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-md flex items-center gap-1.5">
+              <ShieldAlert className="w-4 h-4 shrink-0" />
+              <span>{storeCreationError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleAgentCreateStore} className="space-y-3.5 text-xs">
+            <div>
+              <label className="block font-medium text-zinc-700 mb-1">Store Name *</label>
+              <Input
+                type="text"
+                required
+                placeholder="e.g. Aling Nena Sari-Sari Store"
+                value={newStoreName}
+                onChange={(e) => setNewStoreName(e.target.value)}
+                className="text-xs"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="block font-medium text-zinc-700 mb-1">Owner Name</label>
+                <Input
+                  type="text"
+                  placeholder="Elena Santos"
+                  value={newOwnerName}
+                  onChange={(e) => setNewOwnerName(e.target.value)}
+                  className="text-xs"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-zinc-700 mb-1">Phone Number</label>
+                <Input
+                  type="text"
+                  placeholder="+63 918..."
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(e.target.value)}
+                  className="text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-medium text-zinc-700 mb-1">Address / Landmark</label>
+              <Input
+                type="text"
+                placeholder="Corner St., Brgy. Mabolo"
+                value={newAddress}
+                onChange={(e) => setNewAddress(e.target.value)}
+                className="text-xs"
+              />
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="outline" onClick={() => setIsAddStoreModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={creatingStore} className="bg-zinc-900 text-white hover:bg-zinc-800">
+                {creatingStore ? 'Saving...' : 'Create & Select Store'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* STEP 2: Select Products to Deliver */}
       {step === 2 && (

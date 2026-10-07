@@ -62,41 +62,50 @@ export const PromotionsPage: React.FC = () => {
     }
     setLoading(true);
     try {
-      const [prodsRes, supsRes, promoRes, claimRes] = await Promise.all([
+      const [prodsRes, supsRes, promoRes, claimRes, storesRes, agentsRes, trucksRes] = await Promise.all([
         supabase.from('products').select('*').eq('tenant_id', tenant.id).order('name'),
         supabase.from('suppliers').select('*').eq('tenant_id', tenant.id).order('name'),
-        supabase
-          .from('promotions')
-          .select(`
-            *,
-            suppliers(name, supplier_code),
-            products!buy_product_id(name, sku)
-          `)
-          .eq('tenant_id', tenant.id)
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('supplier_promo_claims')
-          .select(`
-            *,
-            promotions(promo_name, promo_code),
-            suppliers(name, supplier_code),
-            micro_stores(store_name, store_code),
-            agents(full_name),
-            trucks(truck_code)
-          `)
-          .eq('tenant_id', tenant.id)
-          .order('created_at', { ascending: false }),
+        supabase.from('promotions').select('*').eq('tenant_id', tenant.id).order('created_at', { ascending: false }),
+        supabase.from('supplier_promo_claims').select('*').eq('tenant_id', tenant.id).order('created_at', { ascending: false }),
+        supabase.from('micro_stores').select('id, store_name, store_code').eq('tenant_id', tenant.id),
+        supabase.from('agents').select('id, full_name, employee_code').eq('tenant_id', tenant.id),
+        supabase.from('trucks').select('id, truck_code, plate_number').eq('tenant_id', tenant.id),
       ]);
 
-      if (prodsRes.error) console.error('Error fetching products:', prodsRes.error);
-      if (supsRes.error) console.error('Error fetching suppliers:', supsRes.error);
-      if (promoRes.error) console.error('Error fetching promotions:', promoRes.error);
-      if (claimRes.error) console.error('Error fetching claims:', claimRes.error);
+      if (prodsRes.error) console.warn('Products query warning:', prodsRes.error);
+      if (supsRes.error) console.warn('Suppliers query warning:', supsRes.error);
+      if (promoRes.error) console.warn('Promotions query warning:', promoRes.error);
+      if (claimRes.error) console.warn('Claims query warning:', claimRes.error);
 
-      setProducts(prodsRes.data || []);
-      setSuppliers(supsRes.data || []);
-      setPromotions(promoRes.data || []);
-      setClaims(claimRes.data || []);
+      const prodsList = prodsRes.data || [];
+      const supsList = supsRes.data || [];
+      const rawPromos = promoRes.data || [];
+      const rawClaims = claimRes.data || [];
+      const storesList = storesRes.data || [];
+      const agentsList = agentsRes.data || [];
+      const trucksList = trucksRes.data || [];
+
+      // In-memory relational mapping to prevent PostgREST ambiguity errors
+      const enrichedPromos = rawPromos.map((p: any) => ({
+        ...p,
+        suppliers: supsList.find((s: any) => s.id === p.supplier_id) || null,
+        products: prodsList.find((prod: any) => prod.id === p.buy_product_id) || null,
+        free_product: prodsList.find((prod: any) => prod.id === p.free_product_id) || null,
+      }));
+
+      const enrichedClaims = rawClaims.map((c: any) => ({
+        ...c,
+        promotions: rawPromos.find((pr: any) => pr.id === c.promo_id) || null,
+        suppliers: supsList.find((s: any) => s.id === c.supplier_id) || null,
+        micro_stores: storesList.find((st: any) => st.id === c.micro_store_id) || null,
+        agents: agentsList.find((ag: any) => ag.id === c.agent_id) || null,
+        trucks: trucksList.find((tr: any) => tr.id === c.truck_id) || null,
+      }));
+
+      setProducts(prodsList);
+      setSuppliers(supsList);
+      setPromotions(enrichedPromos);
+      setClaims(enrichedClaims);
     } catch (err) {
       console.error('Error fetching promotions data:', err);
     } finally {
@@ -110,7 +119,11 @@ export const PromotionsPage: React.FC = () => {
 
   const handleCreatePromo = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !promoName || !promoCode || !selectedSupplierId || !selectedProductId) return;
+    if (!tenant) return;
+    if (!promoName.trim() || !promoCode.trim() || !selectedSupplierId || !selectedProductId) {
+      setError('Please fill in all required fields.');
+      return;
+    }
 
     setSavingPromo(true);
     setError(null);
@@ -122,15 +135,18 @@ export const PromotionsPage: React.FC = () => {
           promo_code: promoCode.toUpperCase().trim(),
           promo_name: promoName.trim(),
           buy_product_id: selectedProductId,
-          buy_quantity: Number(buyQty),
+          buy_quantity: Number(buyQty) || 5,
           free_product_id: selectedProductId,
-          free_quantity: Number(freeQty),
-          claim_rate: Number(claimRate),
+          free_quantity: Number(freeQty) || 1,
+          claim_rate: Number(claimRate) || 0,
           is_active: true,
         },
       ]);
 
-      if (pErr) throw pErr;
+      if (pErr) {
+        console.error('Create promo database error:', pErr);
+        throw pErr;
+      }
 
       setIsPromoModalOpen(false);
       setPromoName('');
@@ -140,9 +156,18 @@ export const PromotionsPage: React.FC = () => {
       setBuyQty(5);
       setFreeQty(1);
       setClaimRate(720);
+      showSuccess({
+        title: 'Promotion Created',
+        description: 'New supplier trade deal promotion has been saved.',
+      });
       fetchPromotionsData();
     } catch (err: any) {
-      setError(err.message || 'Failed to create promotion.');
+      const msg = err.message || err.details || 'Failed to create promotion.';
+      setError(msg);
+      showError({
+        title: 'Promotion Error',
+        description: msg,
+      });
     } finally {
       setSavingPromo(false);
     }
@@ -169,8 +194,8 @@ export const PromotionsPage: React.FC = () => {
         .update({
           status: 'REIMBURSED',
           settlement_type: settlementType,
-          settlement_reference: settlementNotes || 'Direct Settlement',
-          reimbursed_at: new Date().toISOString(),
+          settlement_notes: settlementNotes || 'Direct Settlement',
+          settled_at: new Date().toISOString(),
         })
         .eq('id', selectedClaim.id);
 

@@ -32,7 +32,32 @@ export const AgentPundoView: React.FC = () => {
           .eq('tenant_id', tenant.id),
       ]);
 
-      const stores = storesRes.data || [];
+      let matchedAgent: any = null;
+      if (profile?.id) {
+        const { data: agData } = await supabase
+          .from('agents')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .eq('user_id', profile.id)
+          .limit(1)
+          .maybeSingle();
+        matchedAgent = agData;
+      }
+      if (!matchedAgent && profile?.full_name) {
+        const { data: agByName } = await supabase
+          .from('agents')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .ilike('full_name', profile.full_name)
+          .limit(1)
+          .maybeSingle();
+        matchedAgent = agByName;
+      }
+
+      const allStores = storesRes.data || [];
+      const stores = matchedAgent
+        ? allStores.filter((s: any) => s.assigned_agent_id === matchedAgent.id || s.created_by_agent_id === matchedAgent.id)
+        : allStores;
       const ledgerEntries = ledgerRes.data || [];
       const returnables = retsRes.data || [];
       const sales = salesRes.data || [];
